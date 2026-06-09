@@ -1,0 +1,18 @@
+# Build artifacts
+writeup/*.pdf
+writeup/*.tex
+writeup/*.html
+writeup/exemplars_in_disguise_files/
+
+# Scratch / intermediate data
+grid_results_model3_quick.csv
+data/k_trajectories.pdf
+data/k_trajectories.png
+
+# Runtime logs
+*.log
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/

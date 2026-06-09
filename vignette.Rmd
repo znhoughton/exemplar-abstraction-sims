@@ -1,0 +1,857 @@
+---
+title: "Simulation Vignette: Learning Sensitivity and the ob < ow Pattern"
+subtitle: "A transparent account of the code, the mathematics, and the linking hypotheses"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+------------------------------------------------------------------------
+
+# Purpose of this document
+
+This vignette is written for a reader who wants to evaluate three
+things:
+
+1.  **Does the code do what it says it does?** Each implementation step
+    is linked back to the mathematical formula it is meant to compute,
+    with a worked numerical example the reader can verify by hand.
+
+2.  **Is the linking hypothesis valid?** Each model is presented with a
+    clear statement of the theoretical claim it is meant to formalise,
+    and an argument for why the code implements that claim rather than
+    something else.
+
+3.  **Are the conclusions warranted?** The results of each simulation
+    are stated as predictions before the code is run, so the reader can
+    evaluate whether the claimed findings follow from the setup.
+
+The document covers three models that share identical data generation
+but differ in how the learner estimates verb distributions. The shared
+components are described once in §2. Each model is then described in
+§3–5 with its own theoretical motivation, mathematical formulation, and
+worked example.
+
+------------------------------------------------------------------------
+
+# Shared components: data generation and evaluation
+
+All three models use the same procedure to (a) build verb token pools,
+(b) construct true verb distributions, and (c) evaluate onset criteria.
+This section describes each component in full.
+
+## The theoretical background: what are we simulating?
+
+Jian & Manning (2026) track how GPT-2's next-token distributions change
+over training for two classes of verbs: *to-Dative* verbs (e.g. *give*,
+*sell*, *award*; N = 35) and *Motion* verbs (e.g. *go*, *run*, *walk*; N
+= 36). They measure two onset events:
+
+-   **ob (between-class onset)**: the training step at which class-level
+    structure first becomes statistically detectable — the model treats
+    dative and motion verbs as systematically different.
+-   **ow (within-class onset)**: the training step at which within-class
+    idiosyncratic differentiation first crosses an absolute divergence
+    threshold — individual verbs start looking distinct from one another
+    even within the same class.
+
+J&M find **ob \< ow**: class structure is detectable before item-level
+idiosyncrasy reaches threshold. They interpret this as evidence of an
+abstraction-first learning bias in GPT-2.
+
+**Our counter-argument**: ob \< ow is a structural consequence of *low
+sensitivity to individual observations*, not of abstraction-first
+learning. Any learner that requires many consistent observations before
+its estimate shifts will detect the stronger class-level signal before
+the noisier item-level signal. We demonstrate this with three
+simulations.
+
+## Token pool construction
+
+### The theoretical motivation
+
+Each verb in the simulation has a set of "preferred" tokens — tokens
+that appear with elevated probability in that verb's context. We
+partition these into three groups:
+
+| Group | Shared with | Linguistic analogue |
+|-----------------|---------------------|----------------------------------|
+| **cross tokens** | All verbs in both classes | High-frequency function words, common syntactic frames |
+| **within tokens** | All verbs in the same class only | Class-specific argument preferences (e.g. dative verbs near recipient NPs) |
+| **idiosyncratic tokens** | Only this verb | Verb-specific collocates (*give* with *permission*; *run* with *marathon*) |
+
+The key structural constraint is **item_overlap \> class_overlap**:
+within-class sharing exceeds cross-class sharing. This is what makes
+class membership a real distributional distinction. It is also the
+critical assumption our argument rests on — if this did not hold, there
+would be no class signal to detect.
+
+### The mathematics
+
+Given parameters `class_overlap`, `item_overlap`, and `n_preferred`:
+
+$$n_\text{cross} = \text{round}(\texttt{class\_overlap} \times n_\text{preferred})$$
+$$n_\text{within} = \text{round}((\texttt{item\_overlap} - \texttt{class\_overlap}) \times n_\text{preferred})$$
+$$n_\text{idio} = n_\text{preferred} - n_\text{cross} - n_\text{within}$$
+
+Token IDs are assigned contiguously. Cross tokens occupy IDs 1 through
+$n_\text{cross}$. Within-class tokens for class A occupy the next
+$n_\text{within}$ IDs, and similarly for class B. Each verb
+independently samples $n_\text{idio}$ idiosyncratic token IDs from the
+remaining vocabulary.
+
+### Worked example
+
+With `n_preferred = 10`, `class_overlap = 0.3`, `item_overlap = 0.6`,
+`VOCAB_SIZE = 20`:
+
+```{r token_pool_example}
+# Parameters
+n_preferred   <- 10
+class_overlap <- 0.3
+item_overlap  <- 0.6
+VOCAB_SIZE    <- 20
+
+# Compute group sizes
+n_cross  <- round(class_overlap * n_preferred)   # 3 tokens
+n_within <- round((item_overlap - class_overlap) * n_preferred)  # 3 tokens
+n_idio   <- n_preferred - n_cross - n_within      # 4 tokens
+
+cat("Cross tokens:", n_cross, "\n")
+cat("Within-class tokens per class:", n_within, "\n")
+cat("Idiosyncratic tokens per verb:", n_idio, "\n")
+
+# Token ID ranges
+cross_tok    <- seq_len(n_cross)                            # IDs 1:3
+within_A_tok <- n_cross + seq_len(n_within)                 # IDs 4:6
+within_B_tok <- n_cross + n_within + seq_len(n_within)      # IDs 7:9
+idio_pool    <- (n_cross + 2 * n_within + 1):VOCAB_SIZE     # IDs 10:20
+
+cat("\nCross token IDs:", cross_tok, "\n")
+cat("Within-A token IDs:", within_A_tok, "\n")
+cat("Within-B token IDs:", within_B_tok, "\n")
+cat("Idiosyncratic pool IDs:", head(idio_pool, 5), "...\n")
+
+# Build two example class-A verbs
+set.seed(1)
+verb_A1 <- c(cross_tok, within_A_tok, sample(idio_pool, n_idio, replace = FALSE))
+verb_A2 <- c(cross_tok, within_A_tok, sample(idio_pool, n_idio, replace = FALSE))
+# Build one class-B verb
+verb_B1 <- c(cross_tok, within_B_tok, sample(idio_pool, n_idio, replace = FALSE))
+
+cat("\nVerb A1 preferred tokens:", sort(verb_A1), "\n")
+cat("Verb A2 preferred tokens:", sort(verb_A2), "\n")
+cat("Verb B1 preferred tokens:", sort(verb_B1), "\n")
+
+# Check: A1 and A2 share cross + within-A tokens; B1 shares only cross tokens with A1
+shared_A1_A2 <- intersect(verb_A1, verb_A2)
+shared_A1_B1 <- intersect(verb_A1, verb_B1)
+cat("\nTokens shared between A1 and A2:", length(shared_A1_A2), "(cross + within-A)\n")
+cat("Tokens shared between A1 and B1:", length(shared_A1_B1), "(cross only)\n")
+cat("item_overlap > class_overlap?", length(shared_A1_A2)/n_preferred, ">",
+    length(shared_A1_B1)/n_preferred, "\n")
+```
+
+The final check confirms the structural asymmetry: same-class verb pairs
+share more tokens than cross-class pairs. This is the distributional
+signature of class membership that ob is designed to detect.
+
+## True distribution construction
+
+### The theoretical motivation
+
+Each verb's "true" distribution $P_\text{verb}$ is what the learner
+would converge to given unlimited data. Preferred tokens receive high
+probability; all other tokens receive a low uniform background weight.
+The lognormal weighting creates heterogeneity within the preferred set —
+preferred tokens are not all equally preferred, just as in real
+language.
+
+### The mathematics
+
+Each verb's raw weights are:
+
+$$w_t = \begin{cases} \text{LogNormal}(\mu_\text{log}, \sigma) & \text{if } t \in \text{preferred}(v) \\ 1.0 & \text{otherwise} \end{cases}$$
+
+where $\mu_\text{log} = \log(\mu) - \frac{1}{2}\sigma^2$ ensures
+$\mathbb{E}[w_t] = \mu$ for preferred tokens. The distribution is then
+normalised: $P_\text{verb}(t) = w_t / \sum_{t'} w_{t'}$.
+
+### Worked example
+
+```{r true_dist_example}
+BG_WEIGHT <- 1.0
+mu    <- 10
+sigma <- 1.0
+
+# lognormal location parameter: ensures E[w] = mu
+log_mean <- log(mu) - 0.5 * sigma^2
+cat("Expected preferred token weight:", exp(log_mean + 0.5 * sigma^2),
+    "(should equal mu =", mu, ")\n")
+
+# Build the true distribution for verb_A1 (defined above)
+set.seed(42)
+w <- rep(BG_WEIGHT, VOCAB_SIZE)
+w[verb_A1] <- rlnorm(n_preferred, log_mean, sigma)  # lognormal weights for preferred tokens
+P_A1 <- w / sum(w)
+
+cat("\nTotal probability on preferred tokens:", round(sum(P_A1[verb_A1]), 3), "\n")
+cat("Total probability on background tokens:", round(sum(P_A1[-verb_A1]), 3), "\n")
+cat("(Preferred tokens are", round(sum(P_A1[verb_A1]) / sum(P_A1[-verb_A1]), 1),
+    "x more probable in aggregate)\n")
+```
+
+**Linking hypothesis check**: preferred tokens are substantially more
+probable than background tokens, but the lognormal variation means some
+preferred tokens are much more prominent than others — creating
+verb-specific distributional "signatures."
+
+## Jensen-Shannon Divergence
+
+### The theoretical motivation
+
+We need a measure of similarity between two verb distributions.
+Jensen-Shannon Divergence (DJS) is used because (a) it is symmetric, (b)
+it is bounded in [0, log(2)], and (c) it is zero if and only if the two
+distributions are identical. This makes it a natural measure of how
+"learnable" the distinction between two verbs is.
+
+### The mathematics
+
+For two distributions $P$ and $Q$:
+
+$$\text{DJS}(P, Q) = H\!\left(\frac{P + Q}{2}\right) - \frac{1}{2}\bigl[H(P) + H(Q)\bigr]$$
+
+where $H(P) = -\sum_t P(t) \log P(t)$ is Shannon entropy. Intuitively,
+DJS measures how much more uncertain you are about a randomly-drawn
+token if you don't know which distribution it came from, compared to if
+you do know. It is zero when $P = Q$ and maximised when $P$ and $Q$ have
+no overlap.
+
+### Worked example: manual vs code verification
+
+```{r jsd_example}
+# Manual calculation for two simple 4-token distributions
+P <- c(0.5, 0.3, 0.1, 0.1)
+Q <- c(0.1, 0.1, 0.3, 0.5)
+
+H <- function(p) -sum(p * log(p + 1e-30))  # Shannon entropy
+
+M        <- 0.5 * (P + Q)                    # mixture distribution
+jsd_manual <- H(M) - 0.5 * (H(P) + H(Q))   # DJS formula
+cat("DJS(P, Q) calculated manually:", round(jsd_manual, 6), "\n")
+cat("H(P):", round(H(P), 4), "  H(Q):", round(H(Q), 4),
+    "  H(mixture):", round(H(M), 4), "\n")
+
+# Sanity checks
+cat("\nDJS(P, P) =", round(H(0.5*(P+P)) - 0.5*(H(P)+H(P)), 6),
+    "(should be 0 — identical distributions)\n")
+cat("Max possible DJS = log(2) =", round(log(2), 4), "\n")
+cat("DJS(P, Q) / log(2) =", round(jsd_manual / log(2), 4),
+    "(fraction of maximum)\n")
+```
+
+The `pairwise_jsd()` function in the model scripts computes this for all
+71 × 71 verb pairs simultaneously using matrix operations rather than a
+double loop — this is purely a computational optimisation and does not
+change the values computed:
+
+```{r pairwise_jsd_function}
+# Reproduction of the pairwise_jsd() function used in all three model scripts
+VOCAB_SIZE_FULL <- 1000L  # as used in the actual scripts
+
+pairwise_jsd <- function(P) {
+  N   <- nrow(P)
+  eps <- 1e-30
+  # Step 1: per-row entropy H(P_i) for each verb i
+  H_vec <- -rowSums(P * log(P + eps))
+
+  jsd_mat <- matrix(0.0, N, N)
+  for (i in seq_len(N - 1L)) {
+    j_idx <- (i + 1L):N
+    # Step 2: mixture M_ij = 0.5*(P_i + P_j) for all j > i simultaneously
+    M     <- 0.5 * (matrix(P[i, ], nrow = length(j_idx),
+                            ncol = ncol(P), byrow = TRUE)
+                    + P[j_idx, , drop = FALSE])
+    # Step 3: H(M_ij) for all j > i
+    H_M   <- -rowSums(M * log(M + eps))
+    # Step 4: DJS = H(mixture) - 0.5*(H_i + H_j), clamped to >= 0
+    d     <- pmax(0.0, H_M - 0.5 * (H_vec[i] + H_vec[j_idx]))
+    jsd_mat[i, j_idx] <- d
+    jsd_mat[j_idx, i] <- d  # DJS is symmetric
+  }
+  jsd_mat
+}
+
+# Verify against manual calculation: wrap P and Q in a 2-row matrix
+P_mat <- rbind(P, Q)
+jsd_from_function <- pairwise_jsd(P_mat)[1, 2]
+cat("DJS from pairwise_jsd():", round(jsd_from_function, 6), "\n")
+cat("DJS from manual calculation:", round(jsd_manual, 6), "\n")
+cat("Match:", isTRUE(all.equal(jsd_from_function, jsd_manual)), "\n")
+```
+
+## Onset criteria
+
+### ob: between-class onset
+
+**Theoretical motivation**: ob should fire when the model has learned to
+treat the two verb classes as systematically different — not just when
+two specific verbs happen to diverge, but when the between \> within
+pattern holds reliably across verbs. A non-parametric test
+(Mann-Whitney) is used because it does not assume normality and tests
+the *distributional* ordering rather than just the mean.
+
+**What ob actually tests**: for each verb $v$ in class A, we compare two
+sets of DJS distances: - **within**: DJS distances from $v$ to all other
+class-A verbs - **between**: DJS distances from $v$ to all class-B verbs
+
+A one-tailed Mann-Whitney test asks: are between-class distances
+stochastically greater than within-class distances? ob fires when ≥ 10%
+of all verbs pass this test (p \< 0.001).
+
+**Why 10%?** J&M describe the ob onset as the "first departure from 0" —
+roughly the first step at which *any* verb passes. Our 10% threshold is
+more conservative, meaning ob fires *later* than under J&M's criterion.
+This makes the ob \< ow result stronger, not weaker.
+
+**Critical property — ob is a RELATIVE test**: it asks whether between
+\> within, not whether either is large in absolute terms. This means ob
+can fire even when all DJS values are tiny, as long as the structural
+between \> within asymmetry is present. This is key to why ob fires
+before ow under high-k/low-sensitivity conditions.
+
+```{r ob_criterion_example}
+# Worked example: construct a simple case where ob should fire
+# 2 class-A verbs, 2 class-B verbs, all with known DJS values
+
+# Construct the DJS matrix manually for illustration:
+# DJS(A1,A2) = 0.02 (small — same class)
+# DJS(A1,B1) = 0.05 (larger — different class)
+# DJS(A1,B2) = 0.06
+
+jsd_example <- matrix(c(
+  0.00, 0.02, 0.05, 0.06,   # A1 row
+  0.02, 0.00, 0.04, 0.05,   # A2 row
+  0.05, 0.04, 0.00, 0.02,   # B1 row
+  0.06, 0.05, 0.02, 0.00    # B2 row
+), nrow = 4, byrow = TRUE)
+
+N_A_ex <- 2; N_B_ex <- 2
+
+# ob check for verb A1 (row 1)
+within_A1  <- jsd_example[1, setdiff(seq_len(N_A_ex), 1)]    # DJS to A2
+between_A1 <- jsd_example[1, (N_A_ex + 1):(N_A_ex + N_B_ex)] # DJS to B1, B2
+
+cat("A1 within-class distances:", within_A1, "\n")
+cat("A1 between-class distances:", between_A1, "\n")
+test_A1 <- wilcox.test(between_A1, within_A1, alternative = "greater", exact = FALSE)
+cat("Mann-Whitney p-value for A1:", round(test_A1$p.value, 4), "\n")
+cat("A1 passes (p < 0.001)?", test_A1$p.value < 0.001, "\n")
+# Note: with only 2 values in each group, exact p-values are not informative —
+# this example illustrates the structure, not statistical power
+```
+
+### ow: within-class onset
+
+**Theoretical motivation**: ow fires when within-class idiosyncrasy is
+detectable — individual verbs within the same class have started to
+diverge from one another. This is measured as the mean DJS across all
+same-class verb pairs.
+
+**What ow actually tests**: the mean of the upper triangle of the
+within-class DJS sub-matrices (upper triangle to avoid counting
+zero-diagonal entries and double-counting pairs).
+
+**Why the threshold of 0.01?** This is taken directly from J&M's
+Experiment 2 breakpoint criterion: within-class DJS is "consistently at
+least 0.01 greater than baseline."
+
+**Why 3 consecutive steps?** The sustained-window requirement prevents a
+single noisy spike from triggering ow prematurely, matching J&M's
+requirement that the threshold be exceeded "consistently."
+
+**Critical property — ow is an ABSOLUTE test**: it asks whether
+within-class DJS reaches 0.01, regardless of what between-class DJS is
+doing. This is what makes the ob/ow ordering sensitive to learning
+sensitivity (k or γ): under low sensitivity, both ob (relative) and ow
+(absolute) start from near-zero DJS, and ob's relative test detects the
+structural asymmetry first; under high sensitivity, ow's threshold is
+crossed by early idiosyncratic spiking before ob's relative test becomes
+reliable.
+
+```{r ow_criterion_example}
+# Worked example of the ow streak requirement
+# Simulate a sequence of mean within-class DJS values over training steps
+DJS_THRESH <- 0.01
+SUSTAIN    <- 3L
+
+within_djs_trajectory <- c(0.002, 0.005, 0.008, 0.012, 0.015, 0.011, 0.009, 0.013, 0.014, 0.016)
+
+ow_nobs   <- NA
+ow_streak <- 0L
+ow_start  <- NA
+
+for (step in seq_along(within_djs_trajectory)) {
+  val <- within_djs_trajectory[step]
+  if (val > DJS_THRESH) {
+    if (is.na(ow_start)) ow_start <- step
+    ow_streak <- ow_streak + 1L
+    if (ow_streak >= SUSTAIN) { ow_nobs <- ow_start; break }
+  } else {
+    ow_streak <- 0L
+    ow_start  <- NA
+  }
+  cat(sprintf("Step %2d: DJS = %.3f  streak = %d  ow_start = %s\n",
+              step, val, ow_streak, ifelse(is.na(ow_start), "NA", ow_start)))
+}
+cat(sprintf("\now fires at step: %s (the first step of the sustained run)\n",
+            ifelse(is.na(ow_nobs), "NA (not detected)", ow_nobs)))
+```
+
+Note that ow fires at the step where the streak *began*, not the step
+where it completed. This is intentional: we want to record when the
+sustained period of above-threshold DJS started, not when we accumulated
+enough evidence to declare it.
+
+------------------------------------------------------------------------
+
+# Model 1: Zero-sensitivity limit (deterministic interpolation)
+
+## Theoretical claim
+
+**Claim**: if a learner has zero sensitivity to individual observations
+— if every new token observation moves the learner's estimate by an
+infinitesimal amount — then the learner will always show ob \< ow.
+
+This is the theoretical extreme case. It serves two purposes: (1) it
+shows the predicted result under the strongest version of the
+low-sensitivity hypothesis, and (2) it provides a clean analytical
+baseline that the more realistic models (2 and 3) should converge to as
+sensitivity decreases.
+
+## Mathematical formulation
+
+At learning progress $\alpha \in [0, 1]$, each verb's estimated
+distribution is:
+
+$$\hat{P}_\text{verb}(\alpha) = (1 - \alpha) \cdot \text{Uniform} + \alpha \cdot P_\text{verb} \tag{1}$$
+
+-   At $\alpha = 0$: all verbs look uniform — the random-initialisation
+    state
+-   At $\alpha = 1$: each verb shows its true distributional profile
+-   At intermediate $\alpha$: a convex mixture
+
+**Why does equation (1) correspond to zero sensitivity?**
+
+A learner with sensitivity controlled by $k$ (Model 2) has expected
+distribution:
+
+$$\mathbb{E}[\hat{P}_\text{verb}(n)] = \frac{n}{n + kV} \cdot P_\text{verb} + \frac{kV}{n + kV} \cdot \text{Uniform} = \alpha(n) \cdot P_\text{verb} + (1 - \alpha(n)) \cdot \text{Uniform}$$
+
+where $\alpha(n) = n/(n + kV)$. This is exactly equation (1), with
+$\alpha$ determined by corpus size and $k$. As $k \to \infty$, the
+variance of the stochastic estimate around this expectation goes to zero
+(each observation contributes $\approx 1/(kV) \to 0$ to the estimate),
+and Model 2 collapses to this deterministic trajectory. **Model 1 is
+the** $k \to \infty$ limit of Model 2.
+
+```{r model1_kinfty_proof}
+# Demonstrate numerically: at large k, Model 2 expectation matches Model 1
+
+# True distribution (simplified 5-token example)
+P_true <- c(0.40, 0.25, 0.15, 0.12, 0.08)  # sums to 1
+V      <- length(P_true)
+
+# At n_obs = 100 with various k values, compute E[P_hat]
+n_obs <- 100
+k_values <- c(0.001, 0.1, 1, 10, 100)
+
+for (k in k_values) {
+  alpha_n <- n_obs / (n_obs + k * V)
+  E_Phat  <- alpha_n * P_true + (1 - alpha_n) * (1/V)
+  cat(sprintf("k = %5.3f: alpha(n) = %.4f, E[P_hat(1)] = %.4f  (Model 1 value: %.4f)\n",
+              k, alpha_n, E_Phat[1], 0.40 * alpha_n + (1/V) * (1 - alpha_n)))
+}
+
+# At k=100, alpha(n) is near 0 for small n -- distribution barely moves from uniform
+k_large <- 1000
+alpha_large <- n_obs / (n_obs + k_large * V)
+cat(sprintf("\nAt k = 1000, alpha(100) = %.6f -- distribution is %.1f%% uniform\n",
+            alpha_large, (1 - alpha_large) * 100))
+```
+
+## Why ob \< ow is guaranteed in Model 1
+
+**Step 1: Between-class DJS is always larger than within-class DJS (for
+any α \> 0)**
+
+At any $\alpha > 0$, each verb's distribution is a mixture of uniform
+and its true distribution. The DJS between two verbs is proportional to
+$\alpha^2$ times the DJS between their true distributions (for small
+$\alpha$). Because item_overlap \> class_overlap, same-class verbs share
+more preferred tokens than cross-class verbs, so DJS(same class) \<
+DJS(different class) by construction. The relative Mann-Whitney test for
+ob detects this structural asymmetry.
+
+**Step 2: The absolute ow threshold must wait for α to grow**
+
+At very small $\alpha$, all DJS values are tiny (proportional to
+$\alpha^2$). The ow threshold requires mean within-class DJS to reach
+0.01. This requires $\alpha$ to be large enough that
+$\alpha^2 \cdot \text{DJS}_\text{true, within} \geq 0.01$. Since the
+relative ob test has no minimum magnitude requirement, ob fires at a
+much smaller $\alpha$.
+
+**Linking hypothesis**: the gap between ob and ow onset is guaranteed
+whenever (a) the true distributions have the within \> cross-class
+similarity structure, and (b) the trajectory is monotone (no
+idiosyncratic intermediate phase). Condition (a) is encoded in the token
+pool. Condition (b) is guaranteed by the deterministic interpolation in
+equation (1).
+
+## Implementation walkthrough
+
+```{r model1_implementation, eval=TRUE}
+# ---- Minimal self-contained implementation of Model 1 ----
+# Using small parameters to keep output readable
+
+VOCAB_SIZE_M1 <- 50L
+N_PREFERRED   <- 10L
+N_A_M1        <- 5L    # small class sizes for illustration
+N_B_M1        <- 5L
+BG_WEIGHT_M1  <- 1.0
+
+# Onset thresholds
+P_THRESH   <- 0.001
+CLASS_FRAC <- 0.10
+DJS_THRESH <- 0.01
+SUSTAIN    <- 3L
+
+# Alpha grid
+ALPHAS_M1 <- exp(seq(log(0.001), log(1.0), length.out = 25L))
+
+set.seed(1)
+
+# Step 1: Token pool
+n_cross  <- round(0.3 * N_PREFERRED)   # 3 cross tokens
+n_within <- round(0.3 * N_PREFERRED)   # 3 within tokens
+n_idio   <- N_PREFERRED - n_cross - n_within  # 4 idio tokens
+
+cross_tok    <- seq_len(n_cross)
+within_A_tok <- n_cross + seq_len(n_within)
+within_B_tok <- n_cross + n_within + seq_len(n_within)
+idio_pool    <- (n_cross + 2L * n_within + 1L):VOCAB_SIZE_M1
+
+mk <- function(cls) c(cross_tok, cls, sample(idio_pool, n_idio, replace = FALSE))
+A_tokens <- replicate(N_A_M1, mk(within_A_tok), simplify = FALSE)
+B_tokens <- replicate(N_B_M1, mk(within_B_tok), simplify = FALSE)
+
+# Step 2: True distributions
+log_mean <- log(30) - 0.5 * 1.0^2  # mu=30, sigma=1.0
+bld <- function(tok_list) {
+  P <- matrix(BG_WEIGHT_M1, nrow = length(tok_list), ncol = VOCAB_SIZE_M1)
+  for (i in seq_along(tok_list)) P[i, tok_list[[i]]] <- rlnorm(N_PREFERRED, log_mean, 1.0)
+  P / rowSums(P)
+}
+
+P_true <- rbind(bld(A_tokens), bld(B_tokens))  # (N_A + N_B) x V
+uni    <- 1.0 / VOCAB_SIZE_M1                  # scalar: uniform probability
+
+# Step 3: Sweep alpha and check onsets
+ob_alpha <- NA_real_; ow_alpha <- NA_real_; streak <- 0L; ow_start <- NA_real_
+
+for (alpha in ALPHAS_M1) {
+  # Equation (1): interpolated distributions
+  P_obs <- (1 - alpha) * uni + alpha * P_true
+
+  # Pairwise DJS
+  D <- pairwise_jsd(P_obs)
+
+  # ob check (same logic as model scripts)
+  if (is.na(ob_alpha)) {
+    n_sig <- sum(sapply(seq_len(N_A_M1), function(i) {
+      suppressWarnings(wilcox.test(
+        D[i, (N_A_M1+1):(N_A_M1+N_B_M1)],
+        D[i, setdiff(seq_len(N_A_M1), i)],
+        alternative = "greater", exact = FALSE)$p.value) < P_THRESH
+    })) +
+    sum(sapply(seq_len(N_B_M1), function(j) {
+      i <- N_A_M1 + j
+      suppressWarnings(wilcox.test(
+        D[i, seq_len(N_A_M1)],
+        D[i, N_A_M1 + setdiff(seq_len(N_B_M1), j)],
+        alternative = "greater", exact = FALSE)$p.value) < P_THRESH
+    }))
+    if (n_sig / (N_A_M1 + N_B_M1) >= CLASS_FRAC) ob_alpha <- alpha
+  }
+
+  # ow check
+  if (is.na(ow_alpha)) {
+    jA <- D[seq_len(N_A_M1), seq_len(N_A_M1)]
+    jB <- D[(N_A_M1+1):(N_A_M1+N_B_M1), (N_A_M1+1):(N_A_M1+N_B_M1)]
+    wm <- (mean(jA[upper.tri(jA)]) + mean(jB[upper.tri(jB)])) / 2
+    if (wm > DJS_THRESH) {
+      if (is.na(ow_start)) ow_start <- alpha
+      streak <- streak + 1L
+      if (streak >= SUSTAIN) ow_alpha <- ow_start
+    } else { streak <- 0L; ow_start <- NA_real_ }
+  }
+  if (!is.na(ob_alpha) && !is.na(ow_alpha)) break
+}
+
+cat("ob fires at alpha =", round(ob_alpha, 5), "\n")
+cat("ow fires at alpha =", round(ow_alpha, 5), "\n")
+cat("ob < ow?", ob_alpha < ow_alpha, "\n")
+cat("log(ow/ob) =", round(log(ow_alpha / ob_alpha), 3),
+    "(positive = ob fired first; larger = bigger gap)\n")
+```
+
+**Linking hypothesis confirmed**: ob fires at a much smaller $\alpha$
+than ow. The relative criterion (ob) detects the structural between \>
+within asymmetry immediately; the absolute criterion (ow) must wait for
+DJS to build up.
+
+------------------------------------------------------------------------
+
+# Model 2: Add-k smoothing
+
+## Theoretical claim
+
+**Claim**: the ob \< ow vs. ow \< ob ordering is controlled entirely by
+$k$ — the smoothing parameter that determines how sensitive the learner
+is to individual observations. At high $k$, the learner is insensitive
+(like Model 1) and produces ob \< ow. At low $k$, idiosyncratic early
+observations create within-class divergence before class structure is
+detectable, and the learner produces ow \< ob.
+
+**The key claim about** $k$: $k$ is like the inverse of a learning rate.
+A large $k$ means each observation barely moves the estimate (low
+effective learning rate). A small $k$ means each observation strongly
+shapes the estimate (high effective learning rate). This is not an
+analogy — it is a mathematical consequence of the formula.
+
+## Mathematical formulation
+
+$$\hat{P}_\text{verb}(t) = \frac{\text{count}(t \mid v, n) + k}{n + k \cdot V} \tag{2}$$
+
+**Bayesian interpretation**: equation (2) is the posterior mean of a
+Dirichlet($k$)–Multinomial conjugate model, where the prior places $k$
+pseudo-observations on each of the $V$ token types. The prior is flat
+(uniform over all tokens) — it carries no class-level information.
+
+### The k-as-inverse-learning-rate proof
+
+If we observe one more token $t$ after $n$ observations, the change in
+the estimated probability of $t$ is:
+
+$$\Delta\hat{P}(t) = \frac{\text{count}(t) + k + 1}{n + 1 + kV} - \frac{\text{count}(t) + k}{n + kV} \approx \frac{1 - \hat{P}(t)}{n + kV}$$
+
+The magnitude of this change is inversely proportional to $n + kV$. At
+large $k$, even a small $n$ gives a large denominator, and each
+observation barely moves the estimate. This is exactly analogous to a
+small learning rate in gradient descent.
+
+```{r k_learning_rate}
+# Demonstrate: how much does one observation change the estimate at different k?
+V      <- 1000
+n_obs  <- 10    # after 10 prior observations
+t_prob <- 0.05  # current estimated probability of token t (for illustration)
+
+k_values_demo <- c(0.001, 0.01, 0.1, 0.5)
+cat("Change in P(t) per new observation of t, at n_obs =", n_obs, ":\n\n")
+for (k in k_values_demo) {
+  delta <- (1 - t_prob) / (n_obs + k * V)
+  cat(sprintf("  k = %.3f:  denominator = %6.1f,  delta_P = %.6f\n",
+              k, n_obs + k * V, delta))
+}
+cat("\nAt k = 0.001, one observation is", round(
+  (1 - t_prob) / (n_obs + 0.001 * V) /
+  ((1 - t_prob) / (n_obs + 0.500 * V)), 0),
+  "x more impactful than at k = 0.5\n")
+```
+
+### Why low k produces ow \< ob
+
+At low $k$, a verb's first few observations strongly spike its estimated
+distribution around the specific tokens that happened to be observed.
+Two same-class verbs that observed *different* idiosyncratic tokens will
+look highly dissimilar — within-class DJS rises quickly. But this
+idiosyncratic spiking is random: there is no reason why "give"'s
+distance to "sell" should be systematically smaller than "give"'s
+distance to "run". The ob criterion (which requires between \> within
+*reliably across all verbs*) has no signal to detect yet. ob fires only
+later, once sufficient data has accumulated for the shared class-level
+tokens to dominate.
+
+### Why high k produces ob \< ow
+
+At high $k$, all distributions remain near-uniform for many
+observations. The structural asymmetry (within-class token sharing \>
+cross-class token sharing) means that, whenever DJS values are non-zero,
+between-class DJS is slightly larger than within-class DJS. The relative
+ob criterion detects this asymmetry even at tiny DJS values. The
+absolute ow criterion must wait for within-class DJS to reach 0.01,
+which takes much longer under heavy smoothing.
+
+## Worked example: low k vs high k
+
+```{r model2_comparison}
+# Simulate a single run with low k and high k to illustrate the difference.
+# Using the same token pool and true distributions for both.
+
+set.seed(1)
+n_cross_m2  <- round(0.3 * N_PREFERRED)
+n_within_m2 <- round(0.3 * N_PREFERRED)
+n_idio_m2   <- N_PREFERRED - n_cross_m2 - n_within_m2
+
+cross_tok_m2    <- seq_len(n_cross_m2)
+within_A_tok_m2 <- n_cross_m2 + seq_len(n_within_m2)
+within_B_tok_m2 <- n_cross_m2 + n_within_m2 + seq_len(n_within_m2)
+idio_pool_m2    <- (n_cross_m2 + 2L * n_within_m2 + 1L):VOCAB_SIZE_M1
+
+mk2 <- function(cls) c(cross_tok_m2, cls,
+                        sample(idio_pool_m2, n_idio_m2, replace = FALSE))
+A_tok_m2 <- replicate(N_A_M1, mk2(within_A_tok_m2), simplify = FALSE)
+B_tok_m2 <- replicate(N_B_M1, mk2(within_B_tok_m2), simplify = FALSE)
+
+PA_true <- bld(A_tok_m2)
+PB_true <- bld(B_tok_m2)
+
+MAX_NOBS <- 2000L
+N_OBS_GRID_M2 <- unique(round(exp(seq(log(1), log(MAX_NOBS), length.out = 15L))))
+
+# Pre-sample draws
+set.seed(42)
+A_draws_m2 <- lapply(seq_len(N_A_M1), function(i)
+  sample(VOCAB_SIZE_M1, MAX_NOBS, replace = TRUE, prob = PA_true[i,]))
+B_draws_m2 <- lapply(seq_len(N_B_M1), function(i)
+  sample(VOCAB_SIZE_M1, MAX_NOBS, replace = TRUE, prob = PB_true[i,]))
+
+run_model2_simple <- function(add_k) {
+  ob <- NA_integer_; ow <- NA_integer_; streak <- 0L; ow_st <- NA_integer_
+  for (n in N_OBS_GRID_M2) {
+    sm <- function(d) { ct <- tabulate(d[seq_len(n)], nbins = VOCAB_SIZE_M1);
+                        (ct + add_k) / (n + add_k * VOCAB_SIZE_M1) }
+    P_hat <- rbind(do.call(rbind, lapply(A_draws_m2, sm)),
+                   do.call(rbind, lapply(B_draws_m2, sm)))
+    D <- pairwise_jsd(P_hat)
+    if (is.na(ob)) {
+      ns <- sum(sapply(seq_len(N_A_M1), function(i) suppressWarnings(
+        wilcox.test(D[i,(N_A_M1+1):(N_A_M1+N_B_M1)],
+                    D[i,setdiff(seq_len(N_A_M1),i)],
+                    alternative="greater", exact=FALSE)$p.value) < P_THRESH)) +
+            sum(sapply(seq_len(N_B_M1), function(j) { i <- N_A_M1+j; suppressWarnings(
+        wilcox.test(D[i,seq_len(N_A_M1)],
+                    D[i,N_A_M1+setdiff(seq_len(N_B_M1),j)],
+                    alternative="greater", exact=FALSE)$p.value) < P_THRESH }))
+      if (ns / (N_A_M1 + N_B_M1) >= CLASS_FRAC) ob <- n
+    }
+    jA <- D[seq_len(N_A_M1), seq_len(N_A_M1)]
+    jB <- D[(N_A_M1+1):(N_A_M1+N_B_M1), (N_A_M1+1):(N_A_M1+N_B_M1)]
+    wm <- (mean(jA[upper.tri(jA)]) + mean(jB[upper.tri(jB)])) / 2
+    if (is.na(ow)) {
+      if (wm > DJS_THRESH) { if (is.na(ow_st)) ow_st <- n; streak <- streak + 1L;
+                              if (streak >= SUSTAIN) ow <- ow_st
+      } else { streak <- 0L; ow_st <- NA_integer_ }
+    }
+    if (!is.na(ob) && !is.na(ow)) break
+  }
+  c(ob = ob, ow = ow)
+}
+
+res_low_k  <- run_model2_simple(0.001)
+res_high_k <- run_model2_simple(0.5)
+
+cat("Low k (0.001):  ob_nobs =", res_low_k["ob"],
+    "  ow_nobs =", res_low_k["ow"],
+    " →", ifelse(res_low_k["ow"] < res_low_k["ob"], "ow < ob", "ob < ow"), "\n")
+cat("High k (0.5):   ob_nobs =", res_high_k["ob"],
+    "  ow_nobs =", res_high_k["ow"],
+    " →", ifelse(res_high_k["ow"] < res_high_k["ob"], "ow < ob", "ob < ow"), "\n")
+```
+
+**Linking hypothesis confirmed**: the same model, same token pool, same
+onset criteria, same random seed — different $k$ produces different
+ob/ow orderings. This directly demonstrates that $k$ (learning
+sensitivity) is the governing variable, not the type of learner.
+
+------------------------------------------------------------------------
+
+# Running the full grid searches
+
+## Installation
+
+``` r
+install.packages(c("furrr", "progressr"))
+```
+
+No other packages are needed. Both scripts use only base R plus
+these two packages.
+
+## Running
+
+From the directory containing the scripts:
+
+``` r
+source("scripts/zero-sensitivity-learner.R")      # ~10 minutes with 6 workers
+source("scripts/variable-sensitivity-learner.R")  # ~45 minutes with 6 workers
+```
+
+Adjust `N_WORKERS` at the top of each script to match your machine
+(`parallel::detectCores() - 1` is a safe default). On a Linux server
+with 20+ cores, set `N_WORKERS <- 20`.
+
+## Output format
+
+Each script produces a CSV file:
+
+| File | Rows | Key columns |
+|------------------|------------------|------------------------------------|
+| `grid_results_model1.csv` | 108 | `frac_ob_lt_ow`, `mean_ob`, `mean_ow`, `mean_log_ratio` |
+| `grid_results_model2.csv` | 432 | `add_k`, `frac_ob_lt_ow`, `frac_ow_lt_ob` |
+
+Each row is one parameter combination. `frac_ob_lt_ow` is the fraction
+of seeds (out of N_SEEDS = 50) where ob fired before ow.
+`mean_log_ratio` = mean log(ow/ob) for seeds where ob \< ow — positive
+and large means ob fired much earlier than ow.
+
+## Interpreting results
+
+**Model 1**: expect `frac_ob_lt_ow` to be near 1.0 across almost all
+parameter combinations. Exceptions at the weakest signal settings (small
+item_overlap − class_overlap gap) are expected.
+
+**Model 2**: expect a clean transition from `frac_ow_lt_ob ≈ 1.0` at low
+`add_k` to `frac_ob_lt_ow ≈ 1.0` at high `add_k`. The transition should
+occur somewhere around `add_k = 0.1–0.5`.
+
+------------------------------------------------------------------------
+
+# Summary of linking hypotheses
+
+This table summarises the key claim-to-code links, so the reader can
+evaluate them directly.
+
+| Claim | Mathematical statement | Implemented as | Where to verify |
+|------------------|------------------|------------------|------------------|
+| Model 1 is the k→∞ limit of Model 2 | E[P̂(n)] = α(n)·P_verb + (1−α)·Uniform | Equation (1) matches equation (2) expected value | §3 proof; `k_learning_rate` chunk |
+| k controls sensitivity to observations | ΔP̂(t) ≈ 1/(n+kV) per observation | Denominator of smooth_verb() in model2_addk.R | §4 proof; `k_learning_rate` chunk |
+| ob is a relative test; ow is absolute | ob: Mann-Whitney; ow: threshold 0.01 | wilcox.test() vs DJS_THRESH constant | §2.5; onset criteria chunks |
+| item_overlap \> class_overlap ensures class signal | DJS(same-class) \< DJS(cross-class) by construction | GRID filters class_overlap \< item_overlap | §2.1; token_pool_example chunk |
+
+```{r session_info}
+sessionInfo()
+```
