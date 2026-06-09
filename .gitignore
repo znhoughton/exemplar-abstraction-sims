@@ -1,8 +1,7 @@
+# Writeup (kept locally, not shared)
+writeup/
+
 # Build artifacts
-writeup/*.pdf
-writeup/*.tex
-writeup/*.html
-writeup/exemplars_in_disguise_files/
 
 # Scratch / intermediate data
 grid_results_model3_quick.csv
