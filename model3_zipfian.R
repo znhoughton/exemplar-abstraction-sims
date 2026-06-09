@@ -12,7 +12,7 @@
 #     1. Sample a verb from the Zipfian distribution over the 71 verbs.
 #     2. Sample a single token from that verb's true distribution P_v.
 #     3. Increment count(token | verb) by 1.
-#   At each checkpoint N_total, apply add-k smoothing per verb:
+#   At each checkpoint N_total, compute the Dirichlet(k) posterior mean per verb:
 #     P_hat_v(t) = (count(t | v, N_total) + k) / (obs_v(N_total) + k * V)
 #   where obs_v(N_total) is the number of draws assigned to verb v so far.
 #

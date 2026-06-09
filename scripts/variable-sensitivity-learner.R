@@ -1,19 +1,20 @@
 # =============================================================================
-# Model 2: Add-k smoothing (corpus-size simulation)
+# Model 2: Variable-Sensitivity Learner (Dirichlet-Multinomial)
 #
 # This model simulates a learner who accumulates actual token observations.
-# At each corpus size n_obs, the estimated distribution is:
+# At each corpus size n_obs, the estimated distribution is the posterior mean
+# of a Dirichlet-Multinomial model:
 #
 #   P̂_verb(t) = (count(t | verb, n_obs) + k) / (n_obs + k × V)
 #
 # where count(t | verb, n_obs) = the number of times token t was observed
 # in the context of this verb across n_obs total observations.
 #
-# The k term is the ADD-K SMOOTHING PARAMETER. It adds k pseudo-observations
-# of every token type, acting as a uniform (flat, uninformative) prior over
-# the vocabulary. This is mathematically equivalent to a Bayesian model with
-# a Dirichlet(k) prior: the posterior mean after observing token counts is
-# exactly this formula.
+# The k term is the DIRICHLET PRIOR CONCENTRATION. It encodes k
+# pseudo-observations of every token type before any data arrives,
+# reflecting a uniform (flat, uninformative) prior over the vocabulary.
+# The formula above is the exact posterior mean of the conjugate
+# Dirichlet(k, k, ..., k) prior updated by the observed token counts.
 #
 # k CONTROLS SENSITIVITY TO INDIVIDUAL OBSERVATIONS:
 #   Low k  (e.g. 0.001): k × V = 1 pseudo-count → real observations dominate
@@ -33,7 +34,7 @@
 # produces both orderings. No abstraction mechanism is needed.
 #
 # DATA GENERATION: identical to Model 1.
-# ESTIMATION: differs from Model 1 — uses stochastic token counts + add-k.
+# ESTIMATION: differs from Model 1 — uses stochastic token counts + Dirichlet(k) prior.
 # =============================================================================
 
 library(furrr)      # parallel map functions (future_map_dfr)
@@ -74,7 +75,7 @@ SUSTAIN    <- 3L     # Consecutive steps ow threshold must hold before declaring
 # =============================================================================
 # SECTION 2: Parameter grid
 # All combinations of structural parameters are tested. The key additional
-# parameter vs. Model 1 is add_k — the smoothing strength.
+# parameter vs. Model 1 is add_k — the Dirichlet prior concentration.
 # =============================================================================
 
 GRID <- expand.grid(
@@ -83,12 +84,12 @@ GRID <- expand.grid(
   item_overlap  = c(0.5, 0.6, 0.7),   # Fraction of preferred tokens shared within class.
   class_overlap = c(0.2, 0.3, 0.4),   # Fraction of preferred tokens shared across classes.
 
-  add_k = c(0.001, 0.01, 0.1, 0.5, 1.0),  # THE KEY VARIABLE. Smoothing strength.
-                                       # Effective pseudo-counts = add_k × VOCAB_SIZE:
-                                       #   0.001 →   1 pseudo-count  (near-zero smoothing)
+  add_k = c(0.001, 0.01, 0.1, 0.5, 1.0),  # THE KEY VARIABLE. Dirichlet prior concentration.
+                                       # Total prior pseudo-counts = add_k × VOCAB_SIZE:
+                                       #   0.001 →   1 pseudo-count  (weak prior, high sensitivity)
                                        #   0.01  →  10 pseudo-counts
                                        #   0.1   → 100 pseudo-counts
-                                       #   0.5   → 500 pseudo-counts (heavy smoothing)
+                                       #   0.5   → 500 pseudo-counts (strong prior, low sensitivity)
                                        #   1.0   → 1000 pseudo-counts
                                        # Low add_k → ow < ob; high add_k → ob < ow.
 
@@ -140,7 +141,7 @@ pairwise_jsd <- function(P) {
 #
 # The data-generation steps (token pool, true distributions) are identical
 # to Model 1. The estimation step is new: instead of interpolating the true
-# distribution, we sample tokens and apply add-k smoothing.
+# distribution, we sample tokens and compute the Dirichlet(k) posterior mean.
 # =============================================================================
 
 run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, add_k, seed) {
@@ -226,15 +227,14 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, add_k, 
 
   for (n_obs in N_OBS_GRID) {
 
-    # Build the add-k smoothed distribution for a single verb's draw sequence.
+    # Compute the Dirichlet(k) posterior mean for a single verb's draw sequence.
     smooth_verb <- function(draws) {
       # tabulate() counts how many times each token ID (1 to VOCAB_SIZE) appears
       # in the first n_obs draws. Returns an integer vector of length VOCAB_SIZE.
       counts <- tabulate(draws[seq_len(n_obs)], nbins = VOCAB_SIZE)
 
-      # Add-k smoothing: (count + k) / (n_obs + k * V)
-      # This is the posterior mean of a Dirichlet-Multinomial model with
-      # a flat Dirichlet(add_k) prior.
+      # Posterior mean of Dirichlet(k, ..., k) prior updated by observed counts:
+      # (count + k) / (n_obs + k * V), where k is the prior pseudo-count per token.
       (counts + add_k) / (n_obs + add_k * VOCAB_SIZE)
     }
 

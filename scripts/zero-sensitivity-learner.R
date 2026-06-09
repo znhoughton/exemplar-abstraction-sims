@@ -153,8 +153,8 @@ GRID <- GRID[GRID$class_overlap < GRID$item_overlap, ]
 pairwise_jsd <- function(P) {
   N   <- nrow(P)   # Number of verbs (71 = N_A + N_B)
   eps <- 1e-30     # Small constant added before log() to avoid log(0) = -Inf.
-                   # This is numerically safe because probabilities are never
-                   # exactly 0 in practice with smoothing applied.
+                   # This is numerically safe because the interpolation formula keeps
+                   # all probabilities bounded away from 0.
 
   # Compute Shannon entropy for each verb: H(P_i) = -sum_t P_i(t) * log(P_i(t))
   # rowSums operates on the N × V matrix, giving a length-N vector of entropies.
