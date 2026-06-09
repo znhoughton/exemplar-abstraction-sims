@@ -5,6 +5,7 @@ writeup/
 
 # Scratch / intermediate data
 grid_results_model3_quick.csv
+model3_quick.R
 data/k_trajectories.pdf
 data/k_trajectories.png
 
