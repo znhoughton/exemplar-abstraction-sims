@@ -320,7 +320,7 @@ Each row is one parameter combination. `frac_ob_lt_ow` is the fraction of seeds 
 | Claim | Mathematical statement | Implemented as |
 |---|---|---|
 | Zero-Sensitivity Learner is the $k\to\infty$ limit of the VSL | $\mathbb{E}[\hat{P}_v(n)] = \alpha(n)\cdot P_v + (1-\alpha)\cdot\text{Uniform}$ | Equation (1) matches equation (2) expected value |
-| $k$ controls sensitivity to observations | $\Delta\hat{P}(t) \approx 1/(n+kV)$ per observation | Denominator of add-k formula in `variable-sensitivity-learner.R` |
+| $k$ controls sensitivity to observations | $\Delta\hat{P}(t) \approx 1/(n+kV)$ per observation | Denominator of the Dirichlet posterior mean in `variable-sensitivity-learner.R` |
 | ob is a relative test; ow is absolute | ob: Mann-Whitney; ow: threshold 0.01 | `wilcox.test()` vs `DJS_THRESH` constant |
 | item_overlap > class_overlap ensures class signal | DJS(same-class) < DJS(cross-class) by construction | `GRID` filters `class_overlap < item_overlap` |
 | $\gamma = 0$ Hierarchical Bayesian Learner collapses to VSL with $k = k_0$ | $\hat{P}_v = (\text{count} + k_0) / (n + k_0 V)$ when $\gamma = 0$ | `denom = n_obs + K_0 * VOCAB_SIZE + gamma` with `gamma = 0` |

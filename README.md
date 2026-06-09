@@ -13,7 +13,7 @@ We show that the abstraction-first onset ordering reported by Jian & Manning (20
 exemplar-abstraction-sims/
 ├── scripts/                        # Simulation scripts
 │   ├── zero-sensitivity-learner.R      # Model 1: deterministic ZSL
-│   ├── variable-sensitivity-learner.R  # Model 2: add-k Dirichlet-Multinomial VSL
+│   ├── variable-sensitivity-learner.R  # Model 2: Dirichlet-Multinomial VSL
 │   ├── hierarchical-bayesian-learner.R # Model 3: hierarchical Bayesian learner
 │   ├── plot_k_trajectories.R           # Trajectory visualization
 │   ├── summarize_results.R             # Results summary
