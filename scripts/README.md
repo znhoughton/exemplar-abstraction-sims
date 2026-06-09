@@ -254,7 +254,7 @@ Output: `data/grid_results_model3_hierarchical.csv`.
 
 ---
 
-## Zipfian VSL (`model3_zipfian.R`)
+## Zipfian VSL (`zipfian-vsl.R`)
 
 ### Theoretical claim
 

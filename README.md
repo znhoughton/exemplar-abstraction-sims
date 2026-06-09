@@ -12,22 +12,21 @@ We show that the abstraction-first onset ordering reported by Jian & Manning (20
 ```
 exemplar-abstraction-sims/
 ├── scripts/                        # Simulation scripts
-│   ├── zero-sensitivity-learner.R      # Model 1: deterministic ZSL
-│   ├── variable-sensitivity-learner.R  # Model 2: Dirichlet-Multinomial VSL
-│   ├── hierarchical-bayesian-learner.R # Model 3: hierarchical Bayesian learner
+│   ├── zero-sensitivity-learner.R      # Zero-Sensitivity Learner (k → ∞ limit)
+│   ├── variable-sensitivity-learner.R  # Variable-Sensitivity Learner (Dirichlet-Multinomial)
+│   ├── hierarchical-bayesian-learner.R # Hierarchical Bayesian Learner
+│   ├── zipfian-vsl.R                   # Zipfian VSL (unequal verb frequencies)
 │   ├── plot_k_trajectories.R           # Trajectory visualization
 │   ├── summarize_results.R             # Results summary
-│   └── README.md                       # Full model documentation and vignette
+│   └── README.md                       # Full model documentation
 ├── data/                           # Simulation output (CSVs)
-│   ├── grid_results_model1.csv         # ZSL grid results (108 combinations)
-│   ├── grid_results_model2.csv         # VSL grid results (432 combinations)
+│   ├── grid_results_model1.csv         # ZSL results (108 combinations × 50 seeds)
+│   ├── grid_results_model2.csv         # VSL results (540 combinations × 50 seeds)
+│   ├── grid_results_model3.csv         # Zipfian VSL results (1620 combinations × 50 seeds)
 │   └── k_trajectories_data.csv         # Trajectory data for visualization
-├── writeup/                        # Paper (local only, not tracked)
-│   └── exemplars_in_disguise.qmd
-└── vignette.Rmd                    # (deprecated — see scripts/README.md)
+└── writeup/                        # Paper (local only, not tracked)
+    └── exemplars_in_disguise.qmd
 ```
-
-> **Note**: `model3_zipfian.R` and `model3_quick.R` are retained at the root temporarily while the Zipfian VSL grid run is in progress. They will be moved to `scripts/` and renamed upon completion.
 
 ## Quick start
 
@@ -38,6 +37,7 @@ install.packages(c("furrr", "progressr"))
 # Run from the repo root
 source("scripts/zero-sensitivity-learner.R")      # ~10 min with 6 workers
 source("scripts/variable-sensitivity-learner.R")  # ~45 min with 6 workers
+source("scripts/zipfian-vsl.R")                   # ~6 hr with 6 workers
 ```
 
 Adjust `N_WORKERS` at the top of each script to match your machine. Results are written to `data/`.
@@ -47,8 +47,8 @@ Adjust `N_WORKERS` at the top of each script to match your machine. Results are 
 | Script | Model | Key parameter |
 |---|---|---|
 | `zero-sensitivity-learner.R` | Deterministic interpolation ($k \to \infty$ limit) | $\alpha \in [0,1]$ |
-| `variable-sensitivity-learner.R` | Dirichlet-Multinomial with add-$k$ smoothing | $k \in \{0.001, \ldots, 1.0\}$ |
-| `hierarchical-bayesian-learner.R` | Hierarchical Bayesian pooling | — |
-| `model3_zipfian.R` *(pending)* | Zipfian VSL (unequal verb frequencies) | $k$, Zipf $s$ |
+| `variable-sensitivity-learner.R` | Dirichlet-Multinomial VSL | $k \in \{0.001, \ldots, 1.0\}$ |
+| `hierarchical-bayesian-learner.R` | Hierarchical Bayesian pooling | $\gamma \in \{0.1, \ldots, 10000\}$ |
+| `zipfian-vsl.R` | Zipfian VSL (unequal verb frequencies) | $k \in \{0.001, \ldots, 1.0\}$, Zipf $s \in \{0.5, 1.0, 1.5\}$ |
 
 See `scripts/README.md` for full mathematical documentation of each model.
