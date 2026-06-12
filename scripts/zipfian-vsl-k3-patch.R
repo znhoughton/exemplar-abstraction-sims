@@ -161,16 +161,30 @@ run_combo <- function(row_i) {
   )
 }
 
-cat(sprintf("%d combinations (k=3 only) x %d seeds\n", nrow(GRID), N_SEEDS))
-plan(multisession, workers = N_WORKERS)
-t0 <- proc.time()[["elapsed"]]
-with_progress({
-  new_results <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
-})
-plan(sequential)
+BACKUP_RDS <- "data/k3_new_results_backup.rds"
 
-existing <- read.csv("../data/grid_results_model3.csv")
+# If a backup from a previous crashed run exists, skip simulation and go straight to append.
+if (file.exists(BACKUP_RDS)) {
+  cat("Found backup RDS from previous run — skipping simulation, loading saved results.\n")
+  new_results <- readRDS(BACKUP_RDS)
+  cat(sprintf("Loaded %d rows from backup.\n", nrow(new_results)))
+} else {
+  cat(sprintf("%d combinations (k=3 only) x %d seeds\n", nrow(GRID), N_SEEDS))
+  plan(multisession, workers = N_WORKERS)
+  t0 <- proc.time()[["elapsed"]]
+  with_progress({
+    new_results <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
+  })
+  plan(sequential)
+  # Save backup immediately — if the CSV append below fails, restart and it will load this.
+  saveRDS(new_results, BACKUP_RDS)
+  cat(sprintf("Simulation done (%.0fs). Saved backup to %s\n",
+              proc.time()[["elapsed"]] - t0, BACKUP_RDS))
+}
+
+existing <- read.csv("data/grid_results_model3.csv")
 combined <- rbind(existing, new_results)
-write.csv(combined, "../data/grid_results_model3.csv", row.names = FALSE)
+write.csv(combined, "data/grid_results_model3.csv", row.names = FALSE)
 cat(sprintf("Appended %d rows. Total rows: %d\n", nrow(new_results), nrow(combined)))
-cat(sprintf("Elapsed: %.0fs\n", proc.time()[["elapsed"]] - t0))
+# Clean up backup now that CSV is safely written.
+if (file.exists(BACKUP_RDS)) file.remove(BACKUP_RDS)
