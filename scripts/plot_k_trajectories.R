@@ -260,7 +260,7 @@ p <- summary_df |>
   ) +
   facet_wrap(~ k_label, ncol = 1, strip.position = "right") +
   labs(
-    x = "Corpus size"
+    x = expression("Observations per verb (" * italic(n)[obs] * ")")
   ) +
   theme_bw(base_size = 16) +
   theme(
