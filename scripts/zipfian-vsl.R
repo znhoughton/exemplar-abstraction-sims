@@ -73,7 +73,7 @@ GRID <- expand.grid(
   sigma         = c(0.5, 1.0, 1.5),
   item_overlap  = c(0.5, 0.6, 0.7),
   class_overlap = c(0.2, 0.3, 0.4),
-  add_k         = c(0.001, 0.01, 0.1, 0.5, 1.0, 3.0),
+  add_k         = c(0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0),
   zipf_s        = c(0.5, 1.0, 1.5),  # Zipf exponent. s=1 matches typical English;
                                        # s=0.5 is flatter; s=1.5 is more skewed.
   stringsAsFactors = FALSE
