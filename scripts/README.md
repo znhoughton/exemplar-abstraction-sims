@@ -1,12 +1,6 @@
 # Simulation Scripts: Model Documentation
 
-This document covers the mathematics, implementation details, and linking hypotheses for each simulation model. It is written for a reader who wants to evaluate three things:
-
-1. **Does the code do what it says it does?** Each implementation step is linked back to the mathematical formula it is meant to compute, with worked numerical examples.
-2. **Is the linking hypothesis valid?** Each model is presented with the theoretical claim it formalises and an argument for why the code implements that claim.
-3. **Are the conclusions warranted?** Results are stated as predictions before the code is run.
-
-All four models are documented here.
+This document covers the mathematics, implementation details, and linking hypotheses for each simulation model, with worked numerical examples connecting each implementation step to the formula it computes. All four models are documented here.
 
 ---
 
