@@ -280,10 +280,10 @@ Rather than re-scanning verb assignments up to each checkpoint, the script makes
 
 ### Parameter grid
 
-Same structural parameters as the VSL, plus $s \in \{0.5, 1.0, 1.5\}$ → run at $k \in \{0.001, 0.01, 0.1, 0.5, 1.0\}$ (1,620 combinations × 50 seeds) in the initial run. `zipfian-vsl-k3-patch.R` later appended $k = 3.0$, and separate runs added $k = 5.0$ and $k = 10.0$, bringing the final grid to $k \in \{0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0\}$ (2,592 combinations × 50 seeds).
+Same structural parameters as the VSL, plus $s \in \{0.5, 1.0, 1.5\}$ and the full $k \in \{0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0\}$ range reported in the writeup (Appendix E and Figure 4 both go up to $k=5$; Appendix E's full table goes up to $k=10$) → 2,592 combinations × 50 seeds, run in a single script.
 Output: `data/grid_results_model3.csv`.
 
-**`zipfian-vsl-k3-patch.R`** is a patch script: it reruns the grid at $k = 3.0$ only and appends the results to the existing `data/grid_results_model3.csv` (loading a `.rds` backup instead of resimulating if one is found from a prior interrupted run). Run it after `zipfian-vsl.R`, as shown below. Note that $k = 5.0$ and $k = 10.0$, also present in the shipped CSV, were added by separate ad hoc runs with no corresponding committed patch script.
+(An earlier version of this pipeline split the $k=3.0$/$k=5.0$/$k=10.0$ rows out into a separate patch script and ad hoc runs rather than including them in `zipfian-vsl.R`'s own grid; that history is gone now — `zipfian-vsl.R` generates the complete grid reported in the paper in one run.)
 
 ---
 
@@ -294,11 +294,12 @@ install.packages(c("furrr", "progressr"))
 
 source("scripts/zero-sensitivity-learner.R")        # ~10 min with 6 workers
 source("scripts/variable-sensitivity-learner.R")    # ~45 min with 6 workers
-source("scripts/zipfian-vsl.R")                     # ~6 hr with 6 workers (k up to 1.0)
-source("scripts/zipfian-vsl-k3-patch.R")            # appends k=3.0 to the above
+source("scripts/zipfian-vsl.R")                     # full k grid in one run (see note on timing below)
 ```
 
 Adjust `N_WORKERS` at the top of each script (`parallel::detectCores() - 1` is a safe default). `hierarchical-bayesian-learner.R` is not included above — see its status note further up.
+
+**Timing note:** `zipfian-vsl.R`'s grid (2,592 combinations × 50 seeds = 129,600 runs) is CPU-bound and embarrassingly parallel across `GRID` rows via `furrr`, so wall-clock time scales roughly with `6 / N_WORKERS`. Budget accordingly for your machine; we don't have a single authoritative timing for the full 8-k-value grid since it was originally assembled incrementally (see above).
 
 To reproduce the threshold-robustness numbers in Appendix G of the writeup:
 

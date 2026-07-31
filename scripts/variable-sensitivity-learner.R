@@ -163,15 +163,29 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, add_k, 
   within_B_tok <- n_cross + n_within + seq_len(n_within)
   idio_pool    <- (n_cross + 2L * n_within + 1L):VOCAB_SIZE  # Available idio IDs.
 
+  # Assign idiosyncratic tokens GLOBALLY across all N_A + N_B verbs, rather than
+  # sampling independently per verb. Independent per-verb sampling let different
+  # verbs land on the same "idiosyncratic" token by chance -- across this grid,
+  # 39-54% of idio-token slots ended up shared with at least one other verb
+  # (sometimes up to 8 verbs sharing one supposedly verb-unique token), which
+  # undermines the token's role as an item-specific signal. Reuse is sometimes
+  # unavoidable ((N_A+N_B) * n_idio can exceed length(idio_pool)), but shuffling
+  # whole copies of the pool and handing out contiguous slices spreads that
+  # reuse evenly instead of leaving it to chance collisions.
+  n_total_idio  <- (N_A + N_B) * n_idio
+  n_copies      <- ceiling(n_total_idio / length(idio_pool))
+  idio_shuffled <- unlist(replicate(n_copies, sample(idio_pool), simplify = FALSE))[seq_len(n_total_idio)]
+  idio_assignments <- split(idio_shuffled, ceiling(seq_len(n_total_idio) / n_idio))
+
   # Build each verb's preferred token list (cross + class-shared + idiosyncratic).
-  make_verb_tokens <- function(class_shared) {
-    c(cross_tok,
-      class_shared,
-      sample(idio_pool, n_idio, replace = FALSE))  # Each verb draws its own unique idio tokens.
+  make_verb_tokens <- function(class_shared, idio_tokens) {
+    c(cross_tok, class_shared, idio_tokens)
   }
 
-  A_tokens <- replicate(N_A, make_verb_tokens(within_A_tok), simplify = FALSE)
-  B_tokens <- replicate(N_B, make_verb_tokens(within_B_tok), simplify = FALSE)
+  A_tokens <- lapply(seq_len(N_A), function(i)
+    make_verb_tokens(within_A_tok, idio_assignments[[i]]))
+  B_tokens <- lapply(seq_len(N_B), function(i)
+    make_verb_tokens(within_B_tok, idio_assignments[[N_A + i]]))
 
   # ---------------------------------------------------------------------------
   # Step 2: Build true distributions P_verb (identical to Model 1)
