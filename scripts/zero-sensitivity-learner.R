@@ -64,7 +64,7 @@ N_SEEDS     <- 50L    # Number of random seeds to run per parameter combination.
                       # Each seed produces a different random token pool and
                       # distribution, giving us a distribution of results.
 
-N_WORKERS   <- 6L     # Number of parallel CPU cores to use. Adjust to match
+N_WORKERS   <- 30L    # Number of parallel CPU cores to use. Adjust to match
                       # your machine (check with parallel::detectCores()).
 
 BG_WEIGHT   <- 1.0    # The raw weight assigned to non-preferred ("background")

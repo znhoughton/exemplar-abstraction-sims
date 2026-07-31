@@ -45,7 +45,7 @@ N_B         <- 36L
 N_VERBS     <- N_A + N_B    # 71
 
 N_SEEDS     <- 50L
-N_WORKERS   <- 6L
+N_WORKERS   <- 30L
 BG_WEIGHT   <- 1.0
 
 LOG_FILE    <- "model3_progress.log"

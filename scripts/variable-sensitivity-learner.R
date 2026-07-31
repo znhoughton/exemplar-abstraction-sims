@@ -52,7 +52,7 @@ N_A         <- 35L    # Dative verbs (Jian & Manning Appendix A).
 N_B         <- 36L    # Motion verbs (Jian & Manning Appendix A).
 
 N_SEEDS     <- 50L    # Random seeds per parameter combination.
-N_WORKERS   <- 6L     # Parallel CPU cores to use.
+N_WORKERS   <- 30L    # Parallel CPU cores to use.
 
 BG_WEIGHT   <- 1.0    # Raw weight for non-preferred (background) tokens.
                       # All background tokens are equally probable before
