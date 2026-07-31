@@ -198,12 +198,14 @@ At high $k$, all distributions remain near-uniform for many observations. The st
 
 ### Parameter grid
 
-Same structural parameters as Model 1, plus $k \in \{0.001, 0.01, 0.1, 0.5, 1.0\}$ → 432 valid combinations × 50 seeds.
+Same structural parameters as Model 1, plus $k \in \{0.001, 0.01, 0.1, 0.5, 1.0\}$ → 540 valid combinations (108 × 5) × 50 seeds.
 Output: `data/grid_results_model2.csv`.
 
 ---
 
 ## Hierarchical Bayesian Learner (`hierarchical-bayesian-learner.R`)
+
+**Status: implemented but not run to completion, and not used in the paper.** No corresponding `data/grid_results_model3_hierarchical.csv` exists in this repo. The class-prototype pooling it implements arguably crosses into abstraction (verbs share information via a pooled prototype rather than being estimated in complete isolation), which is at odds with the paper's "pure memorizer" framing for the models it actually reports. Kept here for reference; treat the parameter grid and output path below as aspirational, not as reproduced results.
 
 ### Theoretical claim
 
@@ -274,12 +276,14 @@ This is the same formula as the VSL, but $n_v$ varies across verbs at each check
 
 ### Implementation detail: efficient checkpoint accumulation
 
-Rather than re-scanning verb assignments up to each checkpoint, the script makes a single O(`MAX_NOBS_TOTAL`) pass, incrementing per-verb counts and recording snapshots when each checkpoint value is reached. This avoids repeatedly calling `tabulate(verb_draws[1:n_total], ...)` and keeps runtime feasible for the full 1,620-combination grid.
+Rather than re-scanning verb assignments up to each checkpoint, the script makes a single O(`MAX_NOBS_TOTAL`) pass, incrementing per-verb counts and recording snapshots when each checkpoint value is reached. This avoids repeatedly calling `tabulate(verb_draws[1:n_total], ...)` and keeps runtime feasible for the full grid.
 
 ### Parameter grid
 
-Same structural parameters and $k$ values as the VSL, plus $s \in \{0.5, 1.0, 1.5\}$ → 1,620 valid combinations × 50 seeds.
+Same structural parameters as the VSL, plus $s \in \{0.5, 1.0, 1.5\}$ → run at $k \in \{0.001, 0.01, 0.1, 0.5, 1.0\}$ (1,620 combinations × 50 seeds) in the initial run. `zipfian-vsl-k3-patch.R` later appended $k = 3.0$, and separate runs added $k = 5.0$ and $k = 10.0$, bringing the final grid to $k \in \{0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0\}$ (2,592 combinations × 50 seeds).
 Output: `data/grid_results_model3.csv`.
+
+**`zipfian-vsl-k3-patch.R`** is a patch script: it reruns the grid at $k = 3.0$ only and appends the results to the existing `data/grid_results_model3.csv` (loading a `.rds` backup instead of resimulating if one is found from a prior interrupted run). Run it after `zipfian-vsl.R`, as shown below. Note that $k = 5.0$ and $k = 10.0$, also present in the shipped CSV, were added by separate ad hoc runs with no corresponding committed patch script.
 
 ---
 
@@ -290,11 +294,19 @@ install.packages(c("furrr", "progressr"))
 
 source("scripts/zero-sensitivity-learner.R")        # ~10 min with 6 workers
 source("scripts/variable-sensitivity-learner.R")    # ~45 min with 6 workers
-source("scripts/hierarchical-bayesian-learner.R")   # ~2 hr with 6 workers
-source("scripts/model3_zipfian.R")                  # ~6 hr with 6 workers
+source("scripts/zipfian-vsl.R")                     # ~6 hr with 6 workers (k up to 1.0)
+source("scripts/zipfian-vsl-k3-patch.R")            # appends k=3.0 to the above
 ```
 
-Adjust `N_WORKERS` at the top of each script (`parallel::detectCores() - 1` is a safe default).
+Adjust `N_WORKERS` at the top of each script (`parallel::detectCores() - 1` is a safe default). `hierarchical-bayesian-learner.R` is not included above — see its status note further up.
+
+To reproduce the threshold-robustness numbers in Appendix G of the writeup:
+
+```r
+source("scripts/appendix_g_reproduction.R")         # ~30 min single-threaded
+```
+
+This precomputes full per-seed onset trajectories (50 seeds, fine alpha/n_obs grids) for the two representative parameter combinations used in Appendix G, and writes `data/appendix_g_case1_raw.csv` and `data/appendix_g_case2_raw.csv`.
 
 ### Output format
 
@@ -302,8 +314,9 @@ Adjust `N_WORKERS` at the top of each script (`parallel::detectCores() - 1` is a
 |---|---|
 | `data/grid_results_model1.csv` | `frac_ob_lt_ow`, `mean_ob_nobs`, `mean_ow_nobs`, `mean_log_ratio` |
 | `data/grid_results_model2.csv` | `add_k`, `frac_ob_lt_ow`, `frac_ow_lt_ob` |
-| `data/grid_results_model3_hierarchical.csv` | `gamma`, `frac_ob_lt_ow`, `frac_ow_lt_ob` |
+| `data/grid_results_model3_hierarchical.csv` | `gamma`, `frac_ob_lt_ow`, `frac_ow_lt_ob` (not present — see Hierarchical Bayesian Learner status note) |
 | `data/grid_results_model3.csv` | `add_k`, `zipf_s`, `frac_ob_lt_ow`, `frac_ow_lt_ob` |
+| `data/appendix_g_case1_raw.csv`, `data/appendix_g_case2_raw.csv` | `step`, `frac_sig`, `within_mean`, `seed` (per-step trajectories, not final onset summaries) |
 
 Each row is one parameter combination. `frac_ob_lt_ow` is the fraction of seeds (out of 50) where ob fired before ow.
 
