@@ -351,8 +351,8 @@ with_progress({
 
 plan(sequential)
 
-write.csv(results, "grid_results_model3.csv", row.names = FALSE)
-cat(sprintf("Saved: grid_results_model3.csv\n"))
+write.csv(results, "../data/grid_results_model3.csv", row.names = FALSE)
+cat(sprintf("Saved: ../data/grid_results_model3.csv\n"))
 cat(sprintf("frac_ow_lt_ob == 1.0 (all seeds): %d\n",
             sum(results$frac_ow_lt_ob == 1.0, na.rm = TRUE)))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",
