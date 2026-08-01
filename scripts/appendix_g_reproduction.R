@@ -172,7 +172,7 @@ case1_results <- do.call(rbind, lapply(seq_len(N_SEEDS), function(s) {
   if (s %% 10 == 0) cat(sprintf("  seed %d/%d (%.0fs elapsed)\n", s, N_SEEDS, proc.time()[["elapsed"]] - t0))
   run_case1(s)
 }))
-write.csv(case1_results, "appendix_g_case1_raw.csv", row.names = FALSE)
+write.csv(case1_results, "../data/appendix_g_case1_raw.csv", row.names = FALSE)
 cat(sprintf("Case 1 done (%.0fs)\n", proc.time()[["elapsed"]] - t0))
 
 cat("Running Case 2 (VSL, k=0.001)...\n")
@@ -180,7 +180,7 @@ case2_results <- do.call(rbind, lapply(seq_len(N_SEEDS), function(s) {
   if (s %% 10 == 0) cat(sprintf("  seed %d/%d (%.0fs elapsed)\n", s, N_SEEDS, proc.time()[["elapsed"]] - t0))
   run_case2(s)
 }))
-write.csv(case2_results, "appendix_g_case2_raw.csv", row.names = FALSE)
+write.csv(case2_results, "../data/appendix_g_case2_raw.csv", row.names = FALSE)
 cat(sprintf("Case 2 done (%.0fs)\n", proc.time()[["elapsed"]] - t0))
 
 # =============================================================================
