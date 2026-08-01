@@ -88,11 +88,20 @@ run_trajectory <- function(add_k, seed) {
   within_B_tok <- n_cross + n_within + seq_len(n_within)
   idio_pool    <- (n_cross + 2L * n_within + 1L):VOCAB_SIZE
 
-  make_verb_tokens <- function(class_shared)
-    c(cross_tok, class_shared, sample(idio_pool, n_idio, replace = FALSE))
+  # Global idio-token assignment (avoids accidental cross-verb collisions); see
+  # zipfian-vsl.R for the full rationale.
+  n_total_idio  <- (N_A + N_B) * n_idio
+  n_copies      <- ceiling(n_total_idio / length(idio_pool))
+  idio_shuffled <- unlist(replicate(n_copies, sample(idio_pool), simplify = FALSE))[seq_len(n_total_idio)]
+  idio_assignments <- split(idio_shuffled, ceiling(seq_len(n_total_idio) / n_idio))
 
-  A_tokens <- replicate(N_A, make_verb_tokens(within_A_tok), simplify = FALSE)
-  B_tokens <- replicate(N_B, make_verb_tokens(within_B_tok), simplify = FALSE)
+  make_verb_tokens <- function(class_shared, idio_tokens)
+    c(cross_tok, class_shared, idio_tokens)
+
+  A_tokens <- lapply(seq_len(N_A), function(i)
+    make_verb_tokens(within_A_tok, idio_assignments[[i]]))
+  B_tokens <- lapply(seq_len(N_B), function(i)
+    make_verb_tokens(within_B_tok, idio_assignments[[N_A + i]]))
 
   log_mean <- log(MU) - 0.5 * SIGMA^2
 
