@@ -52,7 +52,7 @@ N_A         <- 35L    # Dative verbs (Jian & Manning Appendix A).
 N_B         <- 36L    # Motion verbs (Jian & Manning Appendix A).
 
 N_SEEDS     <- 50L    # Random seeds per parameter combination.
-N_WORKERS   <- 30L    # Parallel CPU cores to use.
+N_WORKERS   <- 15L    # Parallel CPU cores to use.
 
 BG_WEIGHT   <- 1.0    # Raw weight for non-preferred (background) tokens.
                       # All background tokens are equally probable before
@@ -321,6 +321,11 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, add_k, 
 
 # =============================================================================
 # SECTION 5: Grid search — run all parameter combinations
+#
+# run_combo() returns one row PER SEED (raw ob_nobs/ow_nobs), not a collapsed
+# summary — see the equivalent comment in zero-sensitivity-learner.R. This is
+# what lets frac_* proportions get Wilson intervals and mean_* values get
+# t-interval/bootstrap CIs computed directly from saved data.
 # =============================================================================
 
 run_combo <- function(row_i) {
@@ -335,32 +340,60 @@ run_combo <- function(row_i) {
     ow[s] <- res["ow_nobs"]
   }
 
-  # both: seeds where BOTH onsets were detected.
-  both     <- !is.na(ob) & !is.na(ow)
-
-  # ob_lt_ow: J&M's pattern — ob fires before ow (between-class before within-class).
-  ob_lt_ow <- both & (ob < ow)
-
-  # ow_lt_ob: the reverse pattern — ow fires before ob.
-  # Expected at low k (high sensitivity to individual observations).
-  ow_lt_ob <- both & (ow < ob)
-
   data.frame(
-    mu             = p$mu,
-    sigma          = p$sigma,
-    item_overlap   = p$item_overlap,
-    class_overlap  = p$class_overlap,
-    add_k          = p$add_k,
-    n_preferred    = N_PREFERRED,
-    frac_detected  = mean(both),          # Fraction of seeds with both onsets found.
-    frac_ob_lt_ow  = mean(ob_lt_ow),      # Fraction with J&M's pattern (ob before ow).
-    frac_ow_lt_ob  = mean(ow_lt_ob),      # Fraction with reverse pattern (ow before ob).
-    mean_ob_nobs   = if (any(both)) mean(ob[both]) else NA_real_,  # Mean corpus size at ob.
-    mean_ow_nobs   = if (any(both)) mean(ow[both]) else NA_real_,  # Mean corpus size at ow.
-
-    # Mean log(ow/ob): positive = ob fired first (larger = bigger gap).
-    mean_log_ratio = if (any(ob_lt_ow)) mean(log(ow[ob_lt_ow] / ob[ob_lt_ow])) else NA_real_
+    mu            = p$mu,
+    sigma         = p$sigma,
+    item_overlap  = p$item_overlap,
+    class_overlap = p$class_overlap,
+    add_k         = p$add_k,
+    n_preferred   = N_PREFERRED,
+    seed          = seq_len(N_SEEDS),
+    ob_nobs       = ob,
+    ow_nobs       = ow
   )
+}
+
+# =============================================================================
+# SECTION 5b: Per-combination summary (from the per-seed table)
+#
+# Reproduces the original summary columns exactly, plus sd_ob_nobs/sd_ow_nobs/
+# sd_log_ratio and the seed counts each mean/ratio was computed over.
+# =============================================================================
+
+summarize_grid <- function(per_seed) {
+  group_cols <- c("mu", "sigma", "item_overlap", "class_overlap", "add_k")
+  combo_key  <- do.call(paste, c(per_seed[group_cols], sep = "\r"))
+
+  rows <- lapply(split(seq_len(nrow(per_seed)), combo_key), function(idx) {
+    d  <- per_seed[idx, ]
+    ob <- d$ob_nobs
+    ow <- d$ow_nobs
+
+    both      <- !is.na(ob) & !is.na(ow)
+    ob_lt_ow  <- both & (ob < ow)
+    ow_lt_ob  <- both & (ow < ob)
+    log_ratio <- if (any(ob_lt_ow)) log(ow[ob_lt_ow] / ob[ob_lt_ow]) else numeric(0)
+
+    data.frame(
+      d[1, group_cols, drop = FALSE],
+      n_preferred    = N_PREFERRED,
+      frac_detected  = mean(both),
+      frac_ob_lt_ow  = mean(ob_lt_ow),
+      frac_ow_lt_ob  = mean(ow_lt_ob),
+      mean_ob_nobs   = if (any(both)) mean(ob[both]) else NA_real_,
+      mean_ow_nobs   = if (any(both)) mean(ow[both]) else NA_real_,
+      sd_ob_nobs     = if (sum(both) > 1) sd(ob[both]) else NA_real_,
+      sd_ow_nobs     = if (sum(both) > 1) sd(ow[both]) else NA_real_,
+      n_both         = sum(both),
+      mean_log_ratio = if (length(log_ratio) > 0) mean(log_ratio) else NA_real_,
+      sd_log_ratio   = if (length(log_ratio) > 1) sd(log_ratio) else NA_real_,
+      n_ob_lt_ow     = length(log_ratio)
+    )
+  })
+
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out[order(out$mu, out$sigma, out$item_overlap, out$class_overlap, out$add_k), ]
 }
 
 # =============================================================================
@@ -376,14 +409,17 @@ plan(multisession, workers = N_WORKERS)  # Spawn N_WORKERS parallel R processes.
 t0 <- proc.time()[["elapsed"]]
 
 with_progress({
-  results <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
+  per_seed <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
 })
 
 plan(sequential)  # Return to single-threaded execution.
 
-write.csv(results, "../data/grid_results_model2.csv", row.names = FALSE)
+results <- summarize_grid(per_seed)
 
-cat(sprintf("Saved: grid_results_model2.csv\n"))
+write.csv(per_seed, "../data/grid_results_model2_per_seed.csv", row.names = FALSE)
+write.csv(results,  "../data/grid_results_model2.csv",          row.names = FALSE)
+
+cat(sprintf("Saved: grid_results_model2.csv, grid_results_model2_per_seed.csv\n"))
 cat(sprintf("frac_ow_lt_ob == 1.0 (all seeds): %d\n",
             sum(results$frac_ow_lt_ob == 1.0, na.rm = TRUE)))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",

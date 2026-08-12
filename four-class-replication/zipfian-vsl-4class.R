@@ -1,34 +1,16 @@
 # =============================================================================
-# Model 3: Zipfian Verb Frequency
+# Model 3 (4-CLASS REPLICATION): Zipfian Verb Frequency
 #
-# Identical to Model 2 (Variable-Sensitivity Learner) except that verb
-# observations are allocated according to a Zipfian distribution rather than
-# uniformly. At each total-token checkpoint N_total, different verbs have
-# accumulated different numbers of observations proportional to their Zipfian
-# frequency rank.
+# Same model as ../scripts/zipfian-vsl.R, generalized to 4 verb classes. See
+# zero-sensitivity-learner-4class.R in this directory for the full
+# explanation of what changed (CLASS_SIZES/N_CLASSES/CLASS_ID, the pooled
+# ob-test generalization, class-averaged ow). This is a SEPARATE script —
+# ../scripts/zipfian-vsl.R is untouched.
 #
-# PROCEDURE:
-#   For each draw in 1:MAX_NOBS_TOTAL:
-#     1. Sample a verb from the Zipfian distribution over the 71 verbs.
-#     2. Sample a single token from that verb's true distribution P_v.
-#     3. Increment count(token | verb) by 1.
-#   At each checkpoint N_total, compute the Dirichlet(k) posterior mean per verb:
-#     P_hat_v(t) = (count(t | v, N_total) + k) / (obs_v(N_total) + k * V)
-#   where obs_v(N_total) is the number of draws assigned to verb v so far.
-#
-# CALIBRATION: N_total is on a scale such that N_total / N_VERBS gives the
-# MEAN observations per verb. This makes the N_total axis directly comparable
-# to Model 2's n_obs axis (set N_total = n_obs * N_VERBS for a fair comparison
-# at the same total observation budget).
-#
-# VERB RANKS: randomly assigned per seed, so results average over which
-# specific verbs happen to be frequent or rare.
-#
-# KEY PREDICTION: rare verbs (few observations) behave like low-k learners
-# (noisy, within-class DJS spikes early), while frequent verbs behave like
-# high-k learners. Net effect: higher k is required to achieve o_b < o_w
-# compared to the uniform-sampling Model 2, and the transition should shift
-# rightward in k.
+# Verb ranks (for the Zipfian sampling distribution) are still assigned
+# uniformly at random across all N_VERBS verbs, independent of class — same
+# as the 2-class version, so class membership and frequency rank remain
+# uncorrelated.
 # =============================================================================
 
 library(furrr)
@@ -40,32 +22,36 @@ library(progressr)
 
 VOCAB_SIZE  <- 1000L
 N_PREFERRED <- 50L
-N_A         <- 35L
-N_B         <- 36L
-N_VERBS     <- N_A + N_B    # 71
+
+# Verb class sizes. Order: Dative, Motion, Reciprocal, Spray-load.
+# Dative/Motion counts are Jian & Manning (2026) Appendix A. Reciprocal/
+# Spray-load are PLACEHOLDERS pending real counts.
+CLASS_SIZES <- c(35L, 36L, 35L, 36L)
+N_CLASSES   <- length(CLASS_SIZES)
+N_VERBS     <- sum(CLASS_SIZES)
+CLASS_ID    <- rep(seq_len(N_CLASSES), CLASS_SIZES)
+CLASS_MEMBERS <- split(seq_len(N_VERBS), CLASS_ID)
 
 N_SEEDS     <- 50L
 N_WORKERS   <- 15L
 BG_WEIGHT   <- 1.0
 
-LOG_FILE    <- "model3_progress.log"
+LOG_FILE    <- "model3_4class_progress.log"
 
-# Total tokens across all 71 verbs. At the maximum checkpoint, the MEAN
+# Total tokens across all N_VERBS verbs. At the maximum checkpoint, the MEAN
 # observations per verb = MAX_NOBS_TOTAL / N_VERBS = 5,000, matching Model 2.
-MAX_NOBS_TOTAL <- N_VERBS * 5000L   # = 355,000
+MAX_NOBS_TOTAL <- N_VERBS * 5000L
 
-# 20 log-spaced checkpoints (total tokens). Minimum = N_VERBS so that each
-# verb has approximately 1 observation in expectation at the first checkpoint.
 N_OBS_GRID <- unique(round(exp(seq(log(N_VERBS), log(MAX_NOBS_TOTAL),
                                     length.out = 20L))))
 
 P_THRESH   <- 0.001
-CLASS_FRAC <- 0.10
+CLASS_FRAC <- 0.10   # Fraction of verbs (now out of N_VERBS = 142) that must pass.
 DJS_THRESH <- 0.01
 SUSTAIN    <- 3L
 
 # =============================================================================
-# SECTION 2: Parameter grid
+# SECTION 2: Parameter grid (identical to the 2-class version, including k=10)
 # =============================================================================
 
 GRID <- expand.grid(
@@ -74,14 +60,13 @@ GRID <- expand.grid(
   item_overlap  = c(0.5, 0.6, 0.7),
   class_overlap = c(0.2, 0.3, 0.4),
   add_k         = c(0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0),
-  zipf_s        = c(0.5, 1.0, 1.5),  # Zipf exponent. s=1 matches typical English;
-                                       # s=0.5 is flatter; s=1.5 is more skewed.
+  zipf_s        = c(0.5, 1.0, 1.5),
   stringsAsFactors = FALSE
 )
 GRID <- GRID[GRID$class_overlap < GRID$item_overlap, ]
 
 # =============================================================================
-# SECTION 3: Pairwise Jensen-Shannon Divergence (identical to Models 1 and 2)
+# SECTION 3: Pairwise Jensen-Shannon Divergence (identical to the 2-class version)
 # =============================================================================
 
 pairwise_jsd <- function(P) {
@@ -111,25 +96,20 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
   set.seed(seed)
 
   # ---------------------------------------------------------------------------
-  # Step 1: Build token pool (identical to Models 1 and 2)
+  # Step 1: Build token pool (see zero-sensitivity-learner-4class.R for the
+  # per-class-block generalization of within-class tokens).
   # ---------------------------------------------------------------------------
 
   n_cross  <- round(class_overlap * n_preferred)
   n_within <- round((item_overlap - class_overlap) * n_preferred)
   n_idio   <- n_preferred - n_cross - n_within
 
-  cross_tok    <- seq_len(n_cross)
-  within_A_tok <- n_cross + seq_len(n_within)
-  within_B_tok <- n_cross + n_within + seq_len(n_within)
-  idio_pool    <- (n_cross + 2L * n_within + 1L):VOCAB_SIZE
+  cross_tok  <- seq_len(n_cross)
+  within_tok <- lapply(seq_len(N_CLASSES), function(c)
+    n_cross + (c - 1L) * n_within + seq_len(n_within))
+  idio_pool  <- (n_cross + N_CLASSES * n_within + 1L):VOCAB_SIZE
 
-  # Assign idiosyncratic tokens GLOBALLY across all N_A + N_B verbs, rather than
-  # sampling independently per verb (which let different verbs land on the same
-  # "idiosyncratic" token by chance -- up to 39-54% of idio-token slots across
-  # this grid, sometimes with 8 verbs sharing one supposedly verb-unique token).
-  # Shuffling whole copies of the pool and handing out contiguous slices spreads
-  # unavoidable reuse evenly instead of leaving it to chance collisions.
-  n_total_idio  <- (N_A + N_B) * n_idio
+  n_total_idio  <- N_VERBS * n_idio
   n_copies      <- ceiling(n_total_idio / length(idio_pool))
   idio_shuffled <- unlist(replicate(n_copies, sample(idio_pool), simplify = FALSE))[seq_len(n_total_idio)]
   idio_assignments <- split(idio_shuffled, ceiling(seq_len(n_total_idio) / n_idio))
@@ -137,13 +117,11 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
   make_verb_tokens <- function(class_shared, idio_tokens)
     c(cross_tok, class_shared, idio_tokens)
 
-  A_tokens <- lapply(seq_len(N_A), function(i)
-    make_verb_tokens(within_A_tok, idio_assignments[[i]]))
-  B_tokens <- lapply(seq_len(N_B), function(i)
-    make_verb_tokens(within_B_tok, idio_assignments[[N_A + i]]))
+  verb_tokens <- lapply(seq_len(N_VERBS), function(i)
+    make_verb_tokens(within_tok[[CLASS_ID[i]]], idio_assignments[[i]]))
 
   # ---------------------------------------------------------------------------
-  # Step 2: Build true distributions (identical to Models 1 and 2)
+  # Step 2: Build true distributions (identical formula to 2-class version)
   # ---------------------------------------------------------------------------
 
   log_mean <- log(mu) - 0.5 * sigma^2
@@ -155,34 +133,25 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
     P / rowSums(P)
   }
 
-  P_true <- rbind(build_dists(A_tokens), build_dists(B_tokens))  # N_VERBS x V
+  P_true <- build_dists(verb_tokens)  # N_VERBS x V
 
   # ---------------------------------------------------------------------------
-  # Step 3: Build Zipfian verb distribution (MODEL 3 SPECIFIC)
-  #
-  # Randomly assign ranks 1:N_VERBS to verbs so that results average over
-  # which specific verbs happen to be frequent or rare across seeds.
-  # Verb at rank r gets probability proportional to 1/r^zipf_s.
+  # Step 3: Build Zipfian verb distribution (identical to 2-class version —
+  # ranks are assigned uniformly at random across all N_VERBS verbs,
+  # independent of class membership).
   # ---------------------------------------------------------------------------
 
-  ranks      <- sample(N_VERBS)               # Random rank assignment
+  ranks      <- sample(N_VERBS)
   zipf_probs <- (1.0 / ranks^zipf_s)
-  zipf_probs <- zipf_probs / sum(zipf_probs)  # Normalize to sum to 1
+  zipf_probs <- zipf_probs / sum(zipf_probs)
 
   # ---------------------------------------------------------------------------
-  # Step 4: Pre-sample all observations (MODEL 3 SPECIFIC)
-  #
-  # Draw MAX_NOBS_TOTAL verb assignments from the Zipfian distribution.
-  # Then, for each verb, independently sample its token draws from P_v.
-  # Processing verb-by-verb (rather than draw-by-draw) keeps this vectorized.
+  # Step 4: Pre-sample all observations (identical mechanics to 2-class version)
   # ---------------------------------------------------------------------------
 
   verb_draws <- sample(N_VERBS, MAX_NOBS_TOTAL, replace = TRUE,
-                       prob = zipf_probs)  # Which verb is observed at each step
+                       prob = zipf_probs)
 
-  # For each verb, extract the positions in verb_draws where it was observed,
-  # then draw the corresponding tokens from P_true[v, ].
-  # verb_streams[[v]]: ordered sequence of token IDs seen for verb v.
   token_draws  <- integer(MAX_NOBS_TOTAL)
   verb_streams <- vector("list", N_VERBS)
   for (v in seq_len(N_VERBS)) {
@@ -190,18 +159,15 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
     if (length(idx) > 0L) {
       toks <- sample(VOCAB_SIZE, length(idx), replace = TRUE, prob = P_true[v, ])
       token_draws[idx]  <- toks
-      verb_streams[[v]] <- toks         # Already in observation order
+      verb_streams[[v]] <- toks
     } else {
-      verb_streams[[v]] <- integer(0L)  # Verb never observed (very unlikely)
+      verb_streams[[v]] <- integer(0L)
     }
   }
 
   # ---------------------------------------------------------------------------
   # Step 5: Pre-compute per-verb observation counts at each checkpoint
-  #
-  # Single O(MAX_NOBS_TOTAL) pass: scan verb_draws once and record how many
-  # observations each verb has accumulated each time a checkpoint is reached.
-  # This avoids repeating tabulate(verb_draws[1:n_total], ...) at each step.
+  # (identical mechanics to 2-class version)
   # ---------------------------------------------------------------------------
 
   obs_at_chk <- matrix(0L, nrow = N_VERBS, ncol = length(N_OBS_GRID))
@@ -229,7 +195,6 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
   for (ci in seq_along(N_OBS_GRID)) {
     n_total <- N_OBS_GRID[ci]
 
-    # Build add-k smoothed estimate for each verb using its accumulated counts.
     P_hat <- matrix(0.0, N_VERBS, VOCAB_SIZE)
     for (v in seq_len(N_VERBS)) {
       n_v    <- obs_at_chk[v, ci]
@@ -242,21 +207,13 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
 
     jsd_mat <- pairwise_jsd(P_hat)
 
-    # ---- ob check ----
+    # ---- ob check: POOLED generalization ----
     if (is.na(ob_nobs)) {
       n_sig <- 0L
-      for (i in seq_len(N_A)) {
-        within  <- jsd_mat[i, setdiff(seq_len(N_A), i)]
-        between <- jsd_mat[i, (N_A + 1L):(N_A + N_B)]
-        if (suppressWarnings(
-              wilcox.test(between, within, alternative = "greater",
-                          exact = FALSE)$p.value) < P_THRESH)
-          n_sig <- n_sig + 1L
-      }
-      for (j in seq_len(N_B)) {
-        i       <- N_A + j
-        within  <- jsd_mat[i, N_A + setdiff(seq_len(N_B), j)]
-        between <- jsd_mat[i, seq_len(N_A)]
+      for (i in seq_len(N_VERBS)) {
+        ci_class <- CLASS_ID[i]
+        within   <- jsd_mat[i, setdiff(CLASS_MEMBERS[[ci_class]], i)]
+        between  <- jsd_mat[i, unlist(CLASS_MEMBERS[-ci_class], use.names = FALSE)]
         if (suppressWarnings(
               wilcox.test(between, within, alternative = "greater",
                           exact = FALSE)$p.value) < P_THRESH)
@@ -265,11 +222,14 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
       if (n_sig / N_VERBS >= CLASS_FRAC) ob_nobs <- n_total
     }
 
-    # ---- ow check ----
+    # ---- ow check: mean over N_CLASSES classes ----
     if (is.na(ow_nobs)) {
-      jA <- jsd_mat[seq_len(N_A), seq_len(N_A)]
-      jB <- jsd_mat[(N_A + 1L):(N_A + N_B), (N_A + 1L):(N_A + N_B)]
-      within_mean <- (mean(jA[upper.tri(jA)]) + mean(jB[upper.tri(jB)])) / 2.0
+      within_dj <- vapply(seq_len(N_CLASSES), function(c) {
+        idx <- CLASS_MEMBERS[[c]]
+        jc  <- jsd_mat[idx, idx]
+        mean(jc[upper.tri(jc)])
+      }, numeric(1))
+      within_mean <- mean(within_dj)
 
       if (within_mean > DJS_THRESH) {
         if (is.na(ow_start)) ow_start <- n_total
@@ -291,11 +251,6 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
 # SECTION 5: Grid search
 # =============================================================================
 
-# run_combo() returns one row PER SEED (raw ob_nobs/ow_nobs) rather than a
-# collapsed summary, so frac_* proportions and mean_* values can get CIs
-# computed directly from saved data later — see the equivalent comment in
-# zero-sensitivity-learner.R. summarize_grid() below rebuilds the original
-# per-combination summary from this table, plus sd_*/n_* columns.
 run_combo <- function(row_i) {
   p  <- GRID[row_i, ]
   ob <- integer(N_SEEDS)
@@ -367,6 +322,8 @@ summarize_grid <- function(per_seed) {
 # SECTION 6: Run
 # =============================================================================
 
+cat(sprintf("4-class replication: %d verbs (classes: %s)\n",
+            N_VERBS, paste(CLASS_SIZES, collapse = ", ")))
 cat(sprintf("%d parameter combinations x %d seeds\nWorkers: %d\n",
             nrow(GRID), N_SEEDS, N_WORKERS))
 cat(sprintf("N_total grid: %d values from %d to %d (mean n_obs: %.0f to %.0f)\n\n",
@@ -387,9 +344,9 @@ plan(sequential)
 
 results <- summarize_grid(per_seed)
 
-write.csv(per_seed, "../data/grid_results_model3_per_seed.csv", row.names = FALSE)
-write.csv(results,  "../data/grid_results_model3.csv",          row.names = FALSE)
-cat(sprintf("Saved: ../data/grid_results_model3.csv, ../data/grid_results_model3_per_seed.csv\n"))
+write.csv(per_seed, "../data/four-class-replication/grid_results_model3_4class_per_seed.csv", row.names = FALSE)
+write.csv(results,  "../data/four-class-replication/grid_results_model3_4class.csv",          row.names = FALSE)
+cat(sprintf("Saved: grid_results_model3_4class.csv, grid_results_model3_4class_per_seed.csv\n"))
 cat(sprintf("frac_ow_lt_ob == 1.0 (all seeds): %d\n",
             sum(results$frac_ow_lt_ob == 1.0, na.rm = TRUE)))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",

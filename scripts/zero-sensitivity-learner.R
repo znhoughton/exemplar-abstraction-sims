@@ -64,7 +64,7 @@ N_SEEDS     <- 50L    # Number of random seeds to run per parameter combination.
                       # Each seed produces a different random token pool and
                       # distribution, giving us a distribution of results.
 
-N_WORKERS   <- 30L    # Number of parallel CPU cores to use. Adjust to match
+N_WORKERS   <- 15L    # Number of parallel CPU cores to use. Adjust to match
                       # your machine (check with parallel::detectCores()).
 
 BG_WEIGHT   <- 1.0    # The raw weight assigned to non-preferred ("background")
@@ -399,8 +399,13 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, seed) {
 # =============================================================================
 # SECTION 5: Grid search — run all parameter combinations
 #
-# run_combo() runs all N_SEEDS seeds for one row of GRID and summarises
-# the results into a single data frame row.
+# run_combo() runs all N_SEEDS seeds for one row of GRID and returns one row
+# PER SEED (not a pre-collapsed summary). This preserves the raw ob_alpha/
+# ow_alpha value for every seed, so confidence intervals (Wilson intervals on
+# the frac_* proportions, bootstrap/t intervals on the mean_* values) can be
+# computed later from data actually on disk, instead of requiring a rerun.
+# The per-combination summary (identical in spirit to the old return value,
+# plus sd_*/n_* columns) is computed afterward by summarize_grid().
 # =============================================================================
 
 run_combo <- function(row_i) {
@@ -414,37 +419,59 @@ run_combo <- function(row_i) {
     ow[s] <- res["ow_alpha"]    # α at which ow fired (NA if not found).
   }
 
-  # both: TRUE for seeds where BOTH ob and ow were detected.
-  both     <- !is.na(ob) & !is.na(ow)
-
-  # ob_lt_ow: TRUE for seeds where both detected AND ob fired before ow.
-  # This is J&M's predicted pattern (between-class onset precedes within-class onset).
-  ob_lt_ow <- both & (ob < ow)
-
-  # Return a one-row data frame with summary statistics for this parameter combo.
   data.frame(
-    mu             = p$mu,
-    sigma          = p$sigma,
-    item_overlap   = p$item_overlap,
-    class_overlap  = p$class_overlap,
-    n_preferred    = N_PREFERRED,
-
-    # Fraction of seeds where both onsets were found (data quality check).
-    frac_detected  = mean(both),
-
-    # KEY RESULT: fraction of seeds with ob < ow (J&M's predicted pattern).
-    frac_ob_lt_ow  = mean(ob_lt_ow),
-
-    # Mean α at ob onset, averaged over seeds where both were detected.
-    mean_ob        = if (any(both)) mean(ob[both]) else NA_real_,
-
-    # Mean α at ow onset.
-    mean_ow        = if (any(both)) mean(ow[both]) else NA_real_,
-
-    # Mean log(ow/ob): positive values indicate ob fired before ow.
-    # Larger values = larger gap between the two onsets.
-    mean_log_ratio = if (any(ob_lt_ow)) mean(log(ow[ob_lt_ow] / ob[ob_lt_ow])) else NA_real_
+    mu            = p$mu,
+    sigma         = p$sigma,
+    item_overlap  = p$item_overlap,
+    class_overlap = p$class_overlap,
+    n_preferred   = N_PREFERRED,
+    seed          = seq_len(N_SEEDS),
+    ob_alpha      = ob,
+    ow_alpha      = ow
   )
+}
+
+# =============================================================================
+# SECTION 5b: Per-combination summary (from the per-seed table)
+#
+# Reproduces the original one-row-per-combination summary exactly (same
+# columns, same values), and adds sd_ob/sd_ow/sd_log_ratio + the seed counts
+# each mean/ratio was computed over, so a t-interval or bootstrap CI can be
+# built for mean_ob, mean_ow, and mean_log_ratio without rerunning anything.
+# =============================================================================
+
+summarize_grid <- function(per_seed) {
+  group_cols <- c("mu", "sigma", "item_overlap", "class_overlap")
+  combo_key  <- do.call(paste, c(per_seed[group_cols], sep = "\r"))
+
+  rows <- lapply(split(seq_len(nrow(per_seed)), combo_key), function(idx) {
+    d  <- per_seed[idx, ]
+    ob <- d$ob_alpha
+    ow <- d$ow_alpha
+
+    both      <- !is.na(ob) & !is.na(ow)
+    ob_lt_ow  <- both & (ob < ow)
+    log_ratio <- if (any(ob_lt_ow)) log(ow[ob_lt_ow] / ob[ob_lt_ow]) else numeric(0)
+
+    data.frame(
+      d[1, group_cols, drop = FALSE],
+      n_preferred    = N_PREFERRED,
+      frac_detected  = mean(both),
+      frac_ob_lt_ow  = mean(ob_lt_ow),
+      mean_ob        = if (any(both)) mean(ob[both]) else NA_real_,
+      mean_ow        = if (any(both)) mean(ow[both]) else NA_real_,
+      sd_ob          = if (sum(both) > 1) sd(ob[both]) else NA_real_,
+      sd_ow          = if (sum(both) > 1) sd(ow[both]) else NA_real_,
+      n_both         = sum(both),
+      mean_log_ratio = if (length(log_ratio) > 0) mean(log_ratio) else NA_real_,
+      sd_log_ratio   = if (length(log_ratio) > 1) sd(log_ratio) else NA_real_,
+      n_ob_lt_ow     = length(log_ratio)
+    )
+  })
+
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out[order(out$mu, out$sigma, out$item_overlap, out$class_overlap), ]
 }
 
 # =============================================================================
@@ -465,15 +492,19 @@ t0 <- proc.time()[["elapsed"]]  # Record start time for elapsed-time reporting.
 # then row-binds the resulting data frames into one combined data frame.
 # .progress = TRUE activates the progressr progress bar.
 with_progress({
-  results <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
+  per_seed <- future_map_dfr(seq_len(nrow(GRID)), run_combo, .progress = TRUE)
 })
 
 plan(sequential)  # Reset to single-threaded execution after the parallel block.
 
-# Save results to CSV in the current working directory.
-write.csv(results, "../data/grid_results_model1.csv", row.names = FALSE)
+results <- summarize_grid(per_seed)
 
-cat(sprintf("Saved: grid_results_model1.csv\n"))
+# Save the raw per-seed table (needed for any CI computation) and the
+# per-combination summary (unchanged schema, plus sd_*/n_* columns).
+write.csv(per_seed, "../data/grid_results_model1_per_seed.csv", row.names = FALSE)
+write.csv(results,  "../data/grid_results_model1.csv",          row.names = FALSE)
+
+cat(sprintf("Saved: grid_results_model1.csv, grid_results_model1_per_seed.csv\n"))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",
             sum(results$frac_ob_lt_ow == 1.0, na.rm = TRUE)))
 cat(sprintf("frac_ob_lt_ow  > 0.9             : %d\n",
