@@ -1,16 +1,11 @@
 # =============================================================================
-# Model 3 (4-CLASS REPLICATION): Zipfian Verb Frequency
+# Model 2 (4-CLASS REPLICATION): Variable-Sensitivity Learner (Dirichlet-Multinomial)
 #
-# Same model as ../scripts/zipfian-vsl.R, generalized to 4 verb classes. See
-# zero-sensitivity-learner-4class.R in this directory for the full
-# explanation of what changed (CLASS_SIZES/N_CLASSES/CLASS_ID, the pooled
-# ob-test generalization, class-averaged ow). This is a SEPARATE script —
-# ../scripts/zipfian-vsl.R is untouched.
-#
-# Verb ranks (for the Zipfian sampling distribution) are still assigned
-# uniformly at random across all N_VERBS verbs, independent of class — same
-# as the 2-class version, so class membership and frequency rank remain
-# uncorrelated.
+# Same model as ../variable-sensitivity-learner.R, generalized to 4
+# verb classes. See zero-sensitivity-learner-4class.R in this directory for
+# the full explanation of what changed (CLASS_SIZES/N_CLASSES/CLASS_ID, the
+# pooled ob-test generalization, class-averaged ow). This is a SEPARATE
+# script — ../variable-sensitivity-learner.R is untouched.
 # =============================================================================
 
 library(furrr)
@@ -34,16 +29,11 @@ CLASS_MEMBERS <- split(seq_len(N_VERBS), CLASS_ID)
 
 N_SEEDS     <- 50L
 N_WORKERS   <- 15L
+
 BG_WEIGHT   <- 1.0
 
-LOG_FILE    <- "model3_4class_progress.log"
-
-# Total tokens across all N_VERBS verbs. At the maximum checkpoint, the MEAN
-# observations per verb = MAX_NOBS_TOTAL / N_VERBS = 5,000, matching Model 2.
-MAX_NOBS_TOTAL <- N_VERBS * 5000L
-
-N_OBS_GRID <- unique(round(exp(seq(log(N_VERBS), log(MAX_NOBS_TOTAL),
-                                    length.out = 20L))))
+MAX_NOBS    <- 5000L
+N_OBS_GRID  <- unique(round(exp(seq(log(1), log(MAX_NOBS), length.out = 20L))))
 
 P_THRESH   <- 0.001
 CLASS_FRAC <- 0.10   # Fraction of verbs (now out of N_VERBS = 142) that must pass.
@@ -51,7 +41,7 @@ DJS_THRESH <- 0.01
 SUSTAIN    <- 3L
 
 # =============================================================================
-# SECTION 2: Parameter grid (identical to the 2-class version, including k=10)
+# SECTION 2: Parameter grid (identical to the 2-class version)
 # =============================================================================
 
 GRID <- expand.grid(
@@ -59,8 +49,7 @@ GRID <- expand.grid(
   sigma         = c(0.5, 1.0, 1.5),
   item_overlap  = c(0.5, 0.6, 0.7),
   class_overlap = c(0.2, 0.3, 0.4),
-  add_k         = c(0.001, 0.01, 0.1, 0.5, 1.0, 3.0, 5.0, 10.0),
-  zipf_s        = c(0.5, 1.0, 1.5),
+  add_k         = c(0.001, 0.01, 0.1, 0.5, 1.0),
   stringsAsFactors = FALSE
 )
 GRID <- GRID[GRID$class_overlap < GRID$item_overlap, ]
@@ -90,14 +79,13 @@ pairwise_jsd <- function(P) {
 # SECTION 4: Single simulation run
 # =============================================================================
 
-run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
-                    add_k, zipf_s, seed) {
+run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, add_k, seed) {
 
   set.seed(seed)
 
   # ---------------------------------------------------------------------------
-  # Step 1: Build token pool (see zero-sensitivity-learner-4class.R for the
-  # per-class-block generalization of within-class tokens).
+  # Step 1: Build the token pool (see zero-sensitivity-learner-4class.R for
+  # the per-class-block generalization of within-class tokens).
   # ---------------------------------------------------------------------------
 
   n_cross  <- round(class_overlap * n_preferred)
@@ -114,77 +102,45 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
   idio_shuffled <- unlist(replicate(n_copies, sample(idio_pool), simplify = FALSE))[seq_len(n_total_idio)]
   idio_assignments <- split(idio_shuffled, ceiling(seq_len(n_total_idio) / n_idio))
 
-  make_verb_tokens <- function(class_shared, idio_tokens)
+  make_verb_tokens <- function(class_shared, idio_tokens) {
     c(cross_tok, class_shared, idio_tokens)
+  }
 
   verb_tokens <- lapply(seq_len(N_VERBS), function(i)
     make_verb_tokens(within_tok[[CLASS_ID[i]]], idio_assignments[[i]]))
 
   # ---------------------------------------------------------------------------
-  # Step 2: Build true distributions (identical formula to 2-class version)
+  # Step 2: Build true distributions P_verb (identical formula to 2-class version)
   # ---------------------------------------------------------------------------
 
   log_mean <- log(mu) - 0.5 * sigma^2
 
   build_dists <- function(token_list) {
     P <- matrix(BG_WEIGHT, nrow = length(token_list), ncol = VOCAB_SIZE)
-    for (i in seq_along(token_list))
+    for (i in seq_along(token_list)) {
       P[i, token_list[[i]]] <- rlnorm(n_preferred, log_mean, sigma)
+    }
     P / rowSums(P)
   }
 
   P_true <- build_dists(verb_tokens)  # N_VERBS x V
 
   # ---------------------------------------------------------------------------
-  # Step 3: Build Zipfian verb distribution (identical to 2-class version —
-  # ranks are assigned uniformly at random across all N_VERBS verbs,
-  # independent of class membership).
+  # Step 3: Pre-sample token sequences (identical mechanics to 2-class version,
+  # just applied to all N_VERBS verbs in one list instead of two).
   # ---------------------------------------------------------------------------
 
-  ranks      <- sample(N_VERBS)
-  zipf_probs <- (1.0 / ranks^zipf_s)
-  zipf_probs <- zipf_probs / sum(zipf_probs)
-
-  # ---------------------------------------------------------------------------
-  # Step 4: Pre-sample all observations (identical mechanics to 2-class version)
-  # ---------------------------------------------------------------------------
-
-  verb_draws <- sample(N_VERBS, MAX_NOBS_TOTAL, replace = TRUE,
-                       prob = zipf_probs)
-
-  token_draws  <- integer(MAX_NOBS_TOTAL)
-  verb_streams <- vector("list", N_VERBS)
-  for (v in seq_len(N_VERBS)) {
-    idx <- which(verb_draws == v)
-    if (length(idx) > 0L) {
-      toks <- sample(VOCAB_SIZE, length(idx), replace = TRUE, prob = P_true[v, ])
-      token_draws[idx]  <- toks
-      verb_streams[[v]] <- toks
-    } else {
-      verb_streams[[v]] <- integer(0L)
-    }
+  presample <- function(P_true_rows) {
+    lapply(seq_len(nrow(P_true_rows)), function(i) {
+      sample(seq_len(VOCAB_SIZE), size = MAX_NOBS, replace = TRUE,
+             prob = P_true_rows[i, ])
+    })
   }
 
-  # ---------------------------------------------------------------------------
-  # Step 5: Pre-compute per-verb observation counts at each checkpoint
-  # (identical mechanics to 2-class version)
-  # ---------------------------------------------------------------------------
-
-  obs_at_chk <- matrix(0L, nrow = N_VERBS, ncol = length(N_OBS_GRID))
-  cur_obs    <- integer(N_VERBS)
-  chk_ptr    <- 1L
-
-  for (idx in seq_len(MAX_NOBS_TOTAL)) {
-    cur_obs[verb_draws[idx]] <- cur_obs[verb_draws[idx]] + 1L
-    while (chk_ptr <= length(N_OBS_GRID) && N_OBS_GRID[chk_ptr] <= idx) {
-      obs_at_chk[, chk_ptr] <- cur_obs
-      chk_ptr <- chk_ptr + 1L
-    }
-    if (chk_ptr > length(N_OBS_GRID)) break
-  }
+  verb_draws <- presample(P_true)  # List of N_VERBS integer vectors, each length MAX_NOBS.
 
   # ---------------------------------------------------------------------------
-  # Step 6: Sweep checkpoints and check onset criteria
+  # Step 4: Sweep corpus size and check onset criteria
   # ---------------------------------------------------------------------------
 
   ob_nobs   <- NA_integer_
@@ -192,37 +148,34 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
   ow_streak <- 0L
   ow_start  <- NA_integer_
 
-  for (ci in seq_along(N_OBS_GRID)) {
-    n_total <- N_OBS_GRID[ci]
+  for (n_obs in N_OBS_GRID) {
 
-    P_hat <- matrix(0.0, N_VERBS, VOCAB_SIZE)
-    for (v in seq_len(N_VERBS)) {
-      n_v    <- obs_at_chk[v, ci]
-      counts <- if (n_v > 0L)
-        tabulate(verb_streams[[v]][seq_len(n_v)], nbins = VOCAB_SIZE)
-      else
-        integer(VOCAB_SIZE)
-      P_hat[v, ] <- (counts + add_k) / (n_v + add_k * VOCAB_SIZE)
+    smooth_verb <- function(draws) {
+      counts <- tabulate(draws[seq_len(n_obs)], nbins = VOCAB_SIZE)
+      (counts + add_k) / (n_obs + add_k * VOCAB_SIZE)
     }
+
+    P_hat <- do.call(rbind, lapply(verb_draws, smooth_verb))  # N_VERBS x V
 
     jsd_mat <- pairwise_jsd(P_hat)
 
-    # ---- ob check: POOLED generalization ----
+    # ---- ob check (between-class onset): POOLED generalization ----
     if (is.na(ob_nobs)) {
       n_sig <- 0L
       for (i in seq_len(N_VERBS)) {
-        ci_class <- CLASS_ID[i]
-        within   <- jsd_mat[i, setdiff(CLASS_MEMBERS[[ci_class]], i)]
-        between  <- jsd_mat[i, unlist(CLASS_MEMBERS[-ci_class], use.names = FALSE)]
+        ci      <- CLASS_ID[i]
+        within  <- jsd_mat[i, setdiff(CLASS_MEMBERS[[ci]], i)]
+        between <- jsd_mat[i, unlist(CLASS_MEMBERS[-ci], use.names = FALSE)]
         if (suppressWarnings(
               wilcox.test(between, within, alternative = "greater",
-                          exact = FALSE)$p.value) < P_THRESH)
+                          exact = FALSE)$p.value) < P_THRESH) {
           n_sig <- n_sig + 1L
+        }
       }
-      if (n_sig / N_VERBS >= CLASS_FRAC) ob_nobs <- n_total
+      if (n_sig / N_VERBS >= CLASS_FRAC) ob_nobs <- n_obs
     }
 
-    # ---- ow check: mean over N_CLASSES classes ----
+    # ---- ow check (within-class onset): mean over N_CLASSES classes ----
     if (is.na(ow_nobs)) {
       within_dj <- vapply(seq_len(N_CLASSES), function(c) {
         idx <- CLASS_MEMBERS[[c]]
@@ -232,7 +185,7 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
       within_mean <- mean(within_dj)
 
       if (within_mean > DJS_THRESH) {
-        if (is.na(ow_start)) ow_start <- n_total
+        if (is.na(ow_start)) ow_start <- n_obs
         ow_streak <- ow_streak + 1L
         if (ow_streak >= SUSTAIN) ow_nobs <- ow_start
       } else {
@@ -248,7 +201,7 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap,
 }
 
 # =============================================================================
-# SECTION 5: Grid search
+# SECTION 5: Grid search — run all parameter combinations
 # =============================================================================
 
 run_combo <- function(row_i) {
@@ -258,31 +211,26 @@ run_combo <- function(row_i) {
 
   for (s in seq_len(N_SEEDS)) {
     res   <- run_one(p$mu, p$sigma, N_PREFERRED, p$item_overlap, p$class_overlap,
-                     p$add_k, p$zipf_s, seed = s)
+                     p$add_k, seed = s)
     ob[s] <- res["ob_nobs"]
     ow[s] <- res["ow_nobs"]
   }
 
-  out <- data.frame(
+  data.frame(
     mu            = p$mu,
     sigma         = p$sigma,
     item_overlap  = p$item_overlap,
     class_overlap = p$class_overlap,
     add_k         = p$add_k,
-    zipf_s        = p$zipf_s,
     n_preferred   = N_PREFERRED,
     seed          = seq_len(N_SEEDS),
     ob_nobs       = ob,
     ow_nobs       = ow
   )
-  cat(sprintf("%s  combo %4d / %d done\n", format(Sys.time(), "%H:%M:%S"),
-              row_i, nrow(GRID)),
-      file = LOG_FILE, append = TRUE)
-  out
 }
 
 summarize_grid <- function(per_seed) {
-  group_cols <- c("mu", "sigma", "item_overlap", "class_overlap", "add_k", "zipf_s")
+  group_cols <- c("mu", "sigma", "item_overlap", "class_overlap", "add_k")
   combo_key  <- do.call(paste, c(per_seed[group_cols], sep = "\r"))
 
   rows <- lapply(split(seq_len(nrow(per_seed)), combo_key), function(idx) {
@@ -301,7 +249,6 @@ summarize_grid <- function(per_seed) {
       frac_detected  = mean(both),
       frac_ob_lt_ow  = mean(ob_lt_ow),
       frac_ow_lt_ob  = mean(ow_lt_ob),
-      frac_tie       = mean(both & !ob_lt_ow & !ow_lt_ob),
       mean_ob_nobs   = if (any(both)) mean(ob[both]) else NA_real_,
       mean_ow_nobs   = if (any(both)) mean(ow[both]) else NA_real_,
       sd_ob_nobs     = if (sum(both) > 1) sd(ob[both]) else NA_real_,
@@ -315,23 +262,19 @@ summarize_grid <- function(per_seed) {
 
   out <- do.call(rbind, rows)
   rownames(out) <- NULL
-  out[order(out$mu, out$sigma, out$item_overlap, out$class_overlap, out$add_k, out$zipf_s), ]
+  out[order(out$mu, out$sigma, out$item_overlap, out$class_overlap, out$add_k), ]
 }
 
 # =============================================================================
-# SECTION 6: Run
+# SECTION 6: Run the grid search in parallel
 # =============================================================================
 
 cat(sprintf("4-class replication: %d verbs (classes: %s)\n",
             N_VERBS, paste(CLASS_SIZES, collapse = ", ")))
 cat(sprintf("%d parameter combinations x %d seeds\nWorkers: %d\n",
             nrow(GRID), N_SEEDS, N_WORKERS))
-cat(sprintf("N_total grid: %d values from %d to %d (mean n_obs: %.0f to %.0f)\n\n",
-            length(N_OBS_GRID), min(N_OBS_GRID), max(N_OBS_GRID),
-            min(N_OBS_GRID) / N_VERBS, max(N_OBS_GRID) / N_VERBS))
-
-cat(sprintf("Started: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-    file = LOG_FILE, append = FALSE)
+cat(sprintf("n_obs grid: %d values from %d to %d\n\n",
+            length(N_OBS_GRID), min(N_OBS_GRID), max(N_OBS_GRID)))
 
 plan(multisession, workers = N_WORKERS)
 t0 <- proc.time()[["elapsed"]]
@@ -344,9 +287,10 @@ plan(sequential)
 
 results <- summarize_grid(per_seed)
 
-write.csv(per_seed, "../data/four-class-replication/grid_results_model3_4class_per_seed.csv", row.names = FALSE)
-write.csv(results,  "../data/four-class-replication/grid_results_model3_4class.csv",          row.names = FALSE)
-cat(sprintf("Saved: grid_results_model3_4class.csv, grid_results_model3_4class_per_seed.csv\n"))
+write.csv(per_seed, "../../data/four-class-replication/grid_results_model2_4class_per_seed.csv", row.names = FALSE)
+write.csv(results,  "../../data/four-class-replication/grid_results_model2_4class.csv",          row.names = FALSE)
+
+cat(sprintf("Saved: grid_results_model2_4class.csv, grid_results_model2_4class_per_seed.csv\n"))
 cat(sprintf("frac_ow_lt_ob == 1.0 (all seeds): %d\n",
             sum(results$frac_ow_lt_ob == 1.0, na.rm = TRUE)))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",

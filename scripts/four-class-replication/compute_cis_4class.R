@@ -1,6 +1,6 @@
 # =============================================================================
 # Confidence intervals for the 4-class replication grid results. Same method
-# as ../scripts/compute_cis.R (Wilson intervals on frac_* proportions,
+# as ../compute_cis.R (Wilson intervals on frac_* proportions,
 # t-intervals on mean_* values) — see that script for the rationale. Requires
 # the *_4class_per_seed.csv files, written by the three *-4class.R scripts in
 # this directory.
@@ -40,7 +40,7 @@ pooled_proportion_ci <- function(per_seed, indicator, group_cols = NULL) {
   out
 }
 
-DATA_DIR <- "../data/four-class-replication"
+DATA_DIR <- "../../data/four-class-replication"
 
 # =============================================================================
 # MODEL 1 (Zero-Sensitivity Learner, 4-class)

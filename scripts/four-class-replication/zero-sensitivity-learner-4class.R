@@ -5,7 +5,7 @@
 # classes (Dative, Motion) to Jian & Manning (2026)'s full 4 classes (Dative,
 # Motion, Reciprocal, Spray-load), as flagged as an open robustness check in
 # the paper's Limitations section. This is a SEPARATE script — the original
-# 2-class scripts in ../scripts/ are untouched.
+# 2-class scripts in the parent directory are untouched.
 #
 # WHAT CHANGED vs. the 2-class version:
 #   - CLASS_SIZES/N_CLASSES/CLASS_ID replace the hardcoded N_A/N_B split.
@@ -215,7 +215,7 @@ run_one <- function(mu, sigma, n_preferred, item_overlap, class_overlap, seed) {
 # SECTION 5: Grid search — run all parameter combinations
 #
 # run_combo() returns one row PER SEED (raw ob_alpha/ow_alpha), matching the
-# CI-enabling pattern used in ../scripts/zero-sensitivity-learner.R.
+# CI-enabling pattern used in ../zero-sensitivity-learner.R.
 # =============================================================================
 
 run_combo <- function(row_i) {
@@ -295,8 +295,8 @@ plan(sequential)
 
 results <- summarize_grid(per_seed)
 
-write.csv(per_seed, "../data/four-class-replication/grid_results_model1_4class_per_seed.csv", row.names = FALSE)
-write.csv(results,  "../data/four-class-replication/grid_results_model1_4class.csv",          row.names = FALSE)
+write.csv(per_seed, "../../data/four-class-replication/grid_results_model1_4class_per_seed.csv", row.names = FALSE)
+write.csv(results,  "../../data/four-class-replication/grid_results_model1_4class.csv",          row.names = FALSE)
 
 cat(sprintf("Saved: grid_results_model1_4class.csv, grid_results_model1_4class_per_seed.csv\n"))
 cat(sprintf("frac_ob_lt_ow == 1.0 (all seeds): %d\n",
