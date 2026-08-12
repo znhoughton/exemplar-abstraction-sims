@@ -33,7 +33,7 @@ CLASS_ID    <- rep(seq_len(N_CLASSES), CLASS_SIZES)
 CLASS_MEMBERS <- split(seq_len(N_VERBS), CLASS_ID)
 
 N_SEEDS     <- 50L
-N_WORKERS   <- 28L
+N_WORKERS   <- 16L
 BG_WEIGHT   <- 1.0
 
 LOG_FILE    <- "model3_4class_progress.log"

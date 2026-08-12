@@ -51,7 +51,7 @@ CLASS_ID    <- rep(seq_len(N_CLASSES), CLASS_SIZES)  # length-N_VERBS class labe
 CLASS_MEMBERS <- split(seq_len(N_VERBS), CLASS_ID)   # verb indices per class, precomputed once
 
 N_SEEDS     <- 50L
-N_WORKERS   <- 28L    # Adjust to match your machine (check with parallel::detectCores()).
+N_WORKERS   <- 16L    # Adjust to match your machine (check with parallel::detectCores()).
 
 BG_WEIGHT   <- 1.0
 
