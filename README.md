@@ -3,7 +3,6 @@
 Simulations accompanying the paper:
 
 > **Exemplars in Disguise: Pure Exemplar Models Mimic Abstraction-First Learning**
-> Zachary Nicholas Houghton & Vsevolod Kapatsinski (University of Oregon)
 
 We show that the abstraction-first onset ordering reported by Jian & Manning (2026) for GPT-2 is reproduced by pure memorizer models with no class-level representations, no information flow between verbs, and no inductive bias toward generalization — provided sensitivity to individual observations is sufficiently low. The ordering reflects observation sensitivity, not learning strategy.
 
