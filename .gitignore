@@ -1,6 +1,6 @@
 # Writeup (kept locally, not shared)
 writeup/
-
+writeup.zip
 # Build artifacts
 
 # Scratch / intermediate data
@@ -9,6 +9,10 @@ model3_quick.R
 data/k_trajectories.pdf
 data/k_trajectories.png
 
+# Exploratory k=15/20 backfill run (one-off, not part of the tracked grid)
+data/grid_results_model3_k15_20_per_seed.csv
+data/model3_k_comparison_heatmap.png
+
 # Runtime logs
 *.log
 
@@ -16,3 +20,10 @@ data/k_trajectories.png
 .Rhistory
 .RData
 .Rproj.user/
+
+# Four-class replication: not reported in the paper (see Limitations), so its outputs
+# stay on disk only. The scripts that produced them were removed.
+data/four-class-replication/
+
+# One-off k=15/20 backfill script (its outputs are ignored above)
+scripts/zipfian-vsl-k15-20.R

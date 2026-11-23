@@ -39,7 +39,7 @@ $$n_\text{cross} = \text{round}(\texttt{class\_overlap} \times n_\text{preferred
 $$n_\text{within} = \text{round}((\texttt{item\_overlap} - \texttt{class\_overlap}) \times n_\text{preferred})$$
 $$n_\text{idio} = n_\text{preferred} - n_\text{cross} - n_\text{within}$$
 
-Token IDs are assigned contiguously. Cross tokens occupy IDs 1 through $n_\text{cross}$. Within-class tokens for each class occupy the next $n_\text{within}$ IDs. Each verb independently samples $n_\text{idio}$ idiosyncratic token IDs from the remaining vocabulary.
+Token IDs are assigned contiguously. Cross tokens occupy IDs 1 through $n_\text{cross}$. Within-class tokens for each class occupy the next $n_\text{within}$ IDs. Idiosyncratic tokens are assigned *globally* across all 71 verbs rather than sampled independently per verb: the remaining pool is shuffled and sliced into contiguous $n_\text{idio}$-sized blocks, one per verb, reshuffling and re-slicing additional copies of the pool whenever $(N_A+N_B) \times n_\text{idio}$ exceeds the pool size. This spreads unavoidable reuse evenly and caps it at no more than two verbs ever sharing one token. (Independent per-verb sampling was tried first but left 39-54% of idio-token slots accidentally shared across verbs, undermining their role as an item-specific signal.)
 
 **Worked example** (n_preferred = 10, class_overlap = 0.3, item_overlap = 0.6):
 

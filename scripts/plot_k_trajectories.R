@@ -1,11 +1,11 @@
 # =============================================================================
 # plot_k_trajectories.R
 #
-# Generates a 4-row trajectory plot showing ob and ow criteria over corpus
-# size for four values of k that straddle the ow<ob / ob<ow transition:
+# Generates a 3-row trajectory plot showing ob and ow criteria over corpus
+# size for three values of k straddling the ow<ob / ob<ow transition:
 #
-#   Before threshold (ow < ob):  k = 0.001,  k = 0.1
-#   After  threshold (ob < ow):  k = 2.0,    k = 10.0
+#   ow < ob regime: k = 0.001, k = 0.01
+#   ob < ow regime: k = 1.0
 #
 # Each row shows one k value. For each step n_obs we record:
 #   - frac_sig:    fraction of verbs passing the Mann-Whitney ob test
